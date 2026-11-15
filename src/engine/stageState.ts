@@ -45,7 +45,7 @@ function sourceLabel(state: GameState): string | null {
   if (!source) return null;
   if (source === 'list') return 'Price list';
   if (source === 'estimate') return 'Estimate';
-  const host = hostOf(price?.evidence.find((e) => e.url)?.url);
+  const host = hostOf(price?.evidence.find((e) => e.kind === 'web' && e.url)?.url);
   return host ? `Google Search: ${host}` : 'Google Search';
 }
 

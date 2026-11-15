@@ -184,3 +184,52 @@ describe('join hint, badge and cap clock', () => {
     expect(buildStageState(state('wait_call', 4, { callStartAt: null }), NOW, config).capRemainingMs).toBeNull();
   });
 });
+
+
+describe('contract regression coverage', () => {
+  for (const phase of PHASES) {
+    it(`keeps the documented stage shape in ${phase}`, () => {
+      const input = state(phase);
+      const before = JSON.stringify(input);
+      const output = buildStageState(input, NOW, config);
+      expect(Object.keys(output).sort()).toEqual(Object.keys(stageFixture(phase)).sort());
+      expect(output.phase).toBe(phase);
+      expect(output.title).toBe('THE PRICE IS LIVE');
+      expect(output.podiums.map(({ id, name, seat, score }) => ({ id, name, seat, score })))
+        .toEqual(input.players.map(({ id, name, seat, score }) => ({ id, name, seat, score })));
+      expect(JSON.stringify(input)).toBe(before);
+    });
+  }
+
+  it('uses the first web evidence URL rather than a list or model URL', () => {
+    const web: PriceResult = {
+      ...price, source: 'web', evidence: [
+        { kind: 'list', label: 'reference', url: 'https://reference.example/item' },
+        { kind: 'model', label: 'model', url: 'https://model.example/item' },
+        { kind: 'web', label: 'missing URL' },
+        { kind: 'web', label: 'retailer', url: 'https://www.target.com/p/item' },
+        { kind: 'web', label: 'later', url: 'https://later.example/item' },
+      ],
+    };
+    const input = state('reveal', 4, {
+      revealStage: 'price', currentItem: { ...state('reveal').currentItem!, price: web },
+    });
+    expect(buildStageState(input, NOW, config).reveal?.sourceLabel).toBe('Google Search: target.com');
+  });
+
+  for (const phase of ['reveal', 'round_score'] as const) {
+    for (const revealStage of ['none', 'drumroll'] as const) {
+      it(`keeps ${phase}/${revealStage} secret even with scored history`, () => {
+        const input = state(phase, 4, {
+          revealStage,
+          history: [{ ...ROUND_EXAMPLE_1, item: { ...ROUND_EXAMPLE_1.item, displayName: SECRET_NAME } }],
+        });
+        const output = buildStageState(input, NOW, config);
+        expect(output.reveal).toEqual({ stage: revealStage, priceText: '', itemName: '', isEstimate: false, sourceLabel: null });
+        for (const secret of [SECRET_NAME, SECRET_RAW, '$34.99']) {
+          expect(JSON.stringify(output)).not.toContain(secret);
+        }
+      });
+    }
+  }
+});
