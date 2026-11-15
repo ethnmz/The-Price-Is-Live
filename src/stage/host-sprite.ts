@@ -570,7 +570,12 @@ function lectern(ctx: Ctx, nowMs: number): void {
   sh.addColorStop(0, 'rgba(10,20,30,0)');
   sh.addColorStop(1, 'rgba(10,20,30,0.35)');
   ctx.fillStyle = sh;
+  // clipped to the body so the band never darkens the sky beside the shoulders
+  ctx.save();
+  bodyPath(ctx);
+  ctx.clip();
   ctx.fillRect(CX - 96, topY - 18, 192, 18);
+  ctx.restore();
   // front panel: slightly narrower at the bottom, lit from the left
   const panel = ctx.createLinearGradient(CX - 84, 0, CX + 84, 0);
   panel.addColorStop(0, shade(base, -0.22));
