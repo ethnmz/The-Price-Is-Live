@@ -5,15 +5,13 @@ import { PLAYER_IDS } from '../contracts/types';
 
 export const MAX_NAME_LEN = 12;
 
-// "in" must stand alone: "in-ear headphones" and "interesting" are not joins.
-const JOIN_RE = /^\s*(?:(?:i\s*'?\s*m|im|i\s+am|we\s*'?\s*re|count me)\s+)?in(?![\p{L}\p{N}]|-[\p{L}\p{N}])/iu;
+const JOIN_RE = /^\s*(?:(?:i\s*['’]?\s*m|im|i am|we['’]?re|count me)\s+)?in\b/i;
 
 /** Is this a join text, and what name did they give? name is null when none was given. */
 export function parseJoinText(text: string): { isJoin: boolean; name: string | null } {
-  text = text.replace(/[\u2018\u2019\u02bc`]/g, "'");
   if (!JOIN_RE.test(text)) return { isJoin: false, name: null };
   let rest = text.replace(JOIN_RE, ' ');
-  rest = rest.replace(/\b(?:i\s*['’]?\s*m|im|i\s+am|we\s*'?\s*re|it\s*'?\s*s|its|this is|my name is|name's)\b/gi, ' ');
+  rest = rest.replace(/\b(?:i\s*['’]?\s*m|im|i am|it\s*['’]?\s*s|its|this is|my name is|name['’]?s)\b/gi, ' ');
   rest = rest.replace(/[^\p{L}\p{N}\s'-]/gu, ' ').replace(/(^|\s)[-']+|[-']+(\s|$)/g, ' ').trim();
   if (!rest) return { isJoin: true, name: null };
   return { isJoin: true, name: cleanName(rest) };
@@ -21,14 +19,14 @@ export function parseJoinText(text: string): { isJoin: boolean; name: string | n
 
 /** Title-case, max 12 characters. */
 export function cleanName(raw: string): string {
-  const words = raw.trim().split(/\s+/).filter(Boolean).map((w) => w.toLowerCase().replace(/(^|[-'])(\p{L})/gu, (_m, sep: string, ch: string) => sep + ch.toUpperCase()));
+  const words = raw.trim().split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
   let name = '';
   for (const w of words) {
     const next = name ? `${name} ${w}` : w;
     if (next.length > MAX_NAME_LEN) break;
     name = next;
   }
-  return name || (words[0] ?? '').slice(0, MAX_NAME_LEN);
+  return name || words[0].slice(0, MAX_NAME_LEN);
 }
 
 export type JoinOutcome = 'joined' | 'duplicate' | 'renamed' | 'full';
