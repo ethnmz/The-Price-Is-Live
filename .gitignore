@@ -1,0 +1,10 @@
+.relay/local/
+node_modules/
+out/
+.cache/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+data/cache.json

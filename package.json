@@ -1,0 +1,47 @@
+{
+  "name": "the-price-is-live",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Price Is Right on a group FaceTime call, hosted by an AI game show host (HackUTA 2026).",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "start": "tsx src/agent.ts",
+    "sim": "tsx scripts/sim-call.ts",
+    "demo:check": "tsx scripts/demo-check.ts",
+    "preview:stage": "tsx scripts/preview-stage.ts",
+    "preview:anim": "tsx scripts/preview-anim.ts",
+    "check:data": "tsx scripts/check-data.ts",
+    "eval": "tsx eval/run-eval.ts",
+    "doctor": "tsx scripts/doctor.ts",
+    "seed": "tsx src/store/seed.ts",
+    "atlas:stats": "tsx scripts/atlas-stats.ts",
+    "warm:tts": "tsx scripts/warm-tts.ts",
+    "smoke:call": "tsx scripts/smoke-call.ts",
+    "smoke:voice": "tsx scripts/smoke-voice.ts",
+    "smoke:stt": "tsx scripts/smoke-stt.ts",
+    "smoke:imessage": "tsx scripts/smoke-imessage.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^3.3.0",
+    "@livekit/rtc-node": "^1.2.2",
+    "@napi-rs/canvas": "^1.1.1",
+    "livekit-server-sdk": "^2.19.3",
+    "mongodb": "^7.9.0",
+    "pino": "^10.4.0",
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
