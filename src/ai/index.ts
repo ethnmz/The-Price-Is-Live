@@ -6,13 +6,14 @@ import type { HostPort, PricingPort, ReferenceItem, StorePort } from '../contrac
 import { createGemini, type GeminiClient } from './gemini';
 import { createGeminiSearch } from './webSearch';
 import { createPricing } from './pricing';
+import { createIdentifier } from './identify';
 import { createHost } from './host/lines';
 import { createQuipper } from './host/quips';
 
 export function createAi(env: Env, a: { items: ReferenceItem[]; store?: StorePort | null }): { pricing: PricingPort; host: HostPort; gemini: GeminiClient } {
   const gemini = createGemini({ apiKey: env.geminiApiKey, model: env.geminiModel });
   const search = env.searchProvider === 'gemini' && gemini.available ? createGeminiSearch(gemini) : null;
-  const pricing = createPricing({ items: a.items, gemini, search, store: a.store ?? null });
+  const pricing = createPricing({ items: a.items, gemini, search, store: a.store ?? null, identify: env.geminiApiKey ? createIdentifier(gemini) : undefined });
   const host = createHost({ quip: createQuipper(gemini) });
   return { pricing, host, gemini };
 }
