@@ -145,11 +145,19 @@ export function createCallPort(a: {
           { label: 'group video', phones, video: true },
           { label: 'group audio only', phones, video: false },
           { label: 'main player only (video)', phones: [phones[0]], video: true },
+          { label: 'main player only (audio)', phones: [phones[0]], video: false },
         ]
-      : [{ label: 'one-to-one video', phones, video: true }];
+      : [
+          { label: 'one-to-one video', phones, video: true },
+          { label: 'one-to-one audio', phones, video: false },
+        ];
     let id = '';
+    let videoOff = false;
+    let groupOff = false;
     for (let i = 0; i < attempts.length; i++) {
       const a = attempts[i];
+      // Skip kinds of call Chert already said it can't make right now.
+      if ((videoOff && a.video) || (groupOff && a.phones.length >= 2)) continue;
       try {
         ({ callId: id } = await chert.createCall({
           phones: a.phones, livekitUrl: env.livekitUrl, participantToken: token,
@@ -162,9 +170,13 @@ export function createCallPort(a: {
         // Say why Chert refused (code, HTTP status, its message); never numbers or tokens.
         const detail = err instanceof ChertError ? `${err.code} (HTTP ${err.status}) ${err.detail ?? ''}` : (err as Error).message;
         console.warn(`[call] Chert refused ${a.label}: ${detail}`.replace(/\+?\d{10,15}/g, '<phone>'));
-        // Only a "no group calls here" refusal is worth a smaller retry; anything else is final.
-        const groupRefusal = err instanceof ChertError && err.code === 'facetime_group_unavailable';
-        if (groupRefusal && i < attempts.length - 1) continue;
+        // Only "no groups here" or "video is switched off" are worth a smaller retry; anything else is final.
+        const code = err instanceof ChertError ? err.code : '';
+        // A refused group *video* call may still allow group audio; a refused audio group means no groups.
+        if (code === 'facetime_group_unavailable' && !a.video) groupOff = true;
+        if (code === 'outbound_video_disabled') videoOff = true;
+        const more = attempts.slice(i + 1).some((n) => !(videoOff && n.video) && !(groupOff && n.phones.length >= 2));
+        if ((code === 'facetime_group_unavailable' || code === 'outbound_video_disabled') && more) continue;
         await session.disconnect().catch(() => {});
         if (err instanceof ChertError) throw new Error(err.human);
         throw err;

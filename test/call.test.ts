@@ -83,6 +83,37 @@ describe('createCallPort', () => {
     expect((await t.port.dial(['+12145550101', '+12145550102'])).callId).toBe('group-audio');
   });
 
+  it('falls back to a group audio call when Chert switches video off', async () => {
+    const seen: { phones: string[]; video?: boolean }[] = [];
+    const t = setup({
+      createCall: vi.fn(async (a: { phones: string[]; video?: boolean }) => {
+        seen.push({ phones: a.phones, video: a.video });
+        if (a.video) throw new ChertError('outbound_video_disabled', 503, 'video off');
+        return { callId: 'audio-group' };
+      }) as unknown as ChertClient['createCall'],
+    });
+    expect((await t.port.dial(['+12145550101', '+12145550102'])).callId).toBe('audio-group');
+    expect(seen).toEqual([
+      { phones: ['+12145550101', '+12145550102'], video: true },
+      { phones: ['+12145550101', '+12145550102'], video: false },
+    ]);
+  });
+
+  it('with groups and video both off, calls the main player by audio', async () => {
+    const seen: { phones: string[]; video?: boolean }[] = [];
+    const t = setup({
+      createCall: vi.fn(async (a: { phones: string[]; video?: boolean }) => {
+        seen.push({ phones: a.phones, video: a.video });
+        if (a.video) throw new ChertError('outbound_video_disabled', 503, 'video off');
+        if (a.phones.length >= 2) throw new ChertError('facetime_group_unavailable', 409, 'no groups');
+        return { callId: 'solo-audio' };
+      }) as unknown as ChertClient['createCall'],
+    });
+    expect((await t.port.dial(['+12145550101', '+12145550102'])).callId).toBe('solo-audio');
+    expect(seen.at(-1)).toEqual({ phones: ['+12145550101'], video: false });
+    expect(seen.length).toBe(3); // group video, group audio, main audio (main video skipped: video is off)
+  });
+
   it('does not step down for other refusals', async () => {
     const t = setup({
       createCall: vi.fn(async () => { throw new ChertError('recipient_not_verified', 422, 'not verified'); }) as unknown as ChertClient['createCall'],
