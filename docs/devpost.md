@@ -1,5 +1,7 @@
 # Devpost submission: The Price Is Live (paste-ready)
 
+**BEFORE SUBMITTING: fill {N}, {X}, {Y} from eval/report.md (see docs/measured-number.md).**
+
 Fill the placeholders before posting: **{N}** = number of held-out items, **{X}** = percent within 15% with the reference list, **{Y}** = percent within 15% for the AI alone. Take all three from `eval/report.md` and use its exact sentence. Do not guess them. Do not post while any `{...}` is still in the text.
 
 ---
