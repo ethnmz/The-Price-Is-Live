@@ -67,6 +67,42 @@ describe('game flow', () => {
   it('scores everyone over and tied guesses', () => { const g=game(4,true); g.ready(); g.finish([[20,20,30],[10,10,10]]); const rounds=g.effects.filter(e=>e.type==='PERSIST' && e.kind==='round'); expect(rounds[0].type==='PERSIST' && rounds[0].doc.winnerReason).toBe('lowest_over'); expect(rounds[0].type==='PERSIST' && rounds[0].doc.winnerIds).toEqual(['p2','p3']); expect(g.effects.some(e=>e.type==='SPEAK' && e.key==='score.tie')).toBe(true); });
   it('records a silent guesser', () => { const g=game(2); g.ready(); g.finish([[null],[10]]); expect(g.effects.some(e=>e.type==='PERSIST' && e.kind==='guess' && e.doc.status==='silent')).toBe(true); });
   it('allows one confirmation correction and locks the second correction immediately', () => { const g=game(2); g.ready(); g.until('guess_listen'); g.speech('5'); g.next(); g.speech('6'); expect(g.state.pendingGuess?.corrections).toBe(1); g.next(); g.speech('7'); expect(g.state.guesses[0]).toMatchObject({ cents:700, corrected:true }); });
+  it('opens listening at the prompt deadline and ignores late speech completion', () => {
+    const g=game(2); g.ready(); g.until('guess_prompt');
+    const prompts=g.effects.filter(e=>e.type==='SPEAK' && ['guess.quiet','guess.prompt'].includes(e.key));
+    const deadline=g.effects.at(-1);
+    expect(deadline).toMatchObject({type:'START_TIMER',ms:g.deps.config.guessPromptMaxMs});
+    if (deadline?.type !== 'START_TIMER') throw new Error('Missing prompt deadline');
+    g.send({type:'TIMER',timerId:deadline.timerId});
+    expect(g.state.phase).toBe('guess_listen');
+    const before=g.state;
+    for (const prompt of prompts) if (prompt.type==='SPEAK') {
+      g.send({type:'SPEAK_DONE',speakId:prompt.speakId});
+      expect(g.state).toBe(before);
+    }
+    expect(g.state.timer?.ms).toBe(g.deps.config.guessSeconds*1000);
+  });
+  it('cancels the prompt deadline when speech finishes first', () => {
+    const g=game(2); g.ready(); g.until('guess_prompt');
+    const deadline=g.effects.at(-1);
+    expect(deadline?.type).toBe('START_TIMER');
+    if (deadline?.type !== 'START_TIMER') throw new Error('Missing prompt deadline');
+    g.until('guess_listen');
+    expect(g.effects).toContainEqual({type:'CANCEL_TIMER',timerId:deadline.timerId});
+    const before=g.state; g.send({type:'TIMER',timerId:deadline.timerId}); expect(g.state).toBe(before);
+  });
+  it('ignores repeated amounts without consuming corrections or restarting confirmation', () => {
+    const g=game(2); g.ready(); g.until('guess_listen'); g.speech('5');
+    const pending=g.state.pendingGuess;
+    const repeated=g.send({type:'SPEECH_FINAL',text:'5',confidence:1});
+    expect(g.state.pendingGuess).toEqual(pending); expect(repeated.effects).toEqual([]);
+    g.next(); const timer=g.state.timer; g.speech('5');
+    expect(g.state.timer).toEqual(timer); expect(g.state.pendingGuess?.corrections).toBe(0);
+    g.speech('6'); expect(g.state.guesses).toHaveLength(0);
+    expect(g.state.pendingGuess).toMatchObject({cents:600,corrections:1});
+    g.next(); g.speech('6'); expect(g.state.pendingGuess?.corrections).toBe(1);
+    g.speech('7'); expect(g.state.guesses[0]).toMatchObject({cents:700,corrected:true});
+  });
   it('relistens after no with remaining time and rejects late timers', () => { const g=game(2); g.ready(); g.until('guess_listen'); const old=g.state.timer!.timerId; g.speech('5'); g.next(); g.speech('no'); expect(g.state.phase).toBe('guess_listen'); expect(g.state.timer!.ms).toBeGreaterThanOrEqual(g.deps.config.minRelistenMs); const before=g.state; g.send({type:'TIMER',timerId:old}); expect(g.state).toEqual(before); });
   it('locks a text guess only for the current guesser', () => { const g=game(2); g.ready(); g.until('guess_listen'); g.text(2,'hello'); expect(g.state.guesses).toHaveLength(0); g.text(2,'$8'); expect(g.state.guesses[0]).toMatchObject({ cents:800,channel:'text' }); });
   it('uses the prop closet when pricing times out', () => { const g=game(2); g.text(1,'Item one'); g.ready(false); g.until('item_resolve'); g.next(); g.next(); expect(g.state.currentItem?.request.origin).toBe('prop_closet'); g.until('show_item'); });

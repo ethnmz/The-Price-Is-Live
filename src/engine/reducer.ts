@@ -128,12 +128,14 @@ function step(input: GameState, event: GameEvent, deps: EngineDeps) {
     effects.push({ type: 'LISTEN', on: false });
     if (s.guessIndex === 0) speak('guess.quiet');
     speak('guess.prompt', { name: name(current()) }, 'listen');
+    timer('listen', c.guessPromptMaxMs);
   }
   function listen(ms = (s.textMode ? c.textModeGuessSeconds : c.guessSeconds)*1000) {
     phase('guess_listen'); effects.push({ type: 'LISTEN', on: true }); timer('silent', ms, true);
   }
   function confirm(cents: number, raw: string, spoken?: string) {
     const old = s.pendingGuess;
+    if (old?.cents === cents) return;
     if (s.timer) s.remaining = Math.max(c.minRelistenMs, s.timer.ms - (event.at-s.timer.startedAt));
     phase('guess_confirm'); s.pendingGuess = { cents, rawTranscript: raw, spokenForm: spoken ?? deps.spokenAmount(cents), corrections: old ? old.corrections+1 : 0 };
     if (s.pendingGuess.corrections >= 2) return lock('voice');
