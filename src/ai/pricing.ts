@@ -81,11 +81,11 @@ export function createPricing(a: {
           // Track the model independently: a rejection already received must beat web prices.
           const state: { model: Awaited<ReturnType<typeof estimatePrice>> } = { model: null };
           const estimate = Promise.resolve().then(() => estimatePrice(a.gemini, clean, matches.map(m => m.item), timeoutMs))
-            .catch(() => null).then(result => {
+            .then(result => {
               state.model = result;
               if (result?.notAProduct) finish(fallback(true));
               return result;
-            });
+            }, () => null);
           const web = new Promise<Awaited<ReturnType<SearchProvider['search']>> | null>(res => {
             if (!a.search) { res(null); return; }
             const timer = setTimeout(() => res(null), webTimeoutMs);

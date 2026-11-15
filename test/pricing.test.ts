@@ -46,6 +46,35 @@ describe('pricing pipeline', () => {
       });
     }
     expect(persist).not.toHaveBeenCalled();
+    expect(web.search).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a nonproduct result before a pending web search completes', async () => {
+    vi.useFakeTimers();
+    const persist = vi.fn();
+    const pending = createPricing({ items, gemini: gemini({ ...product, notAProduct: true }),
+      search: { search: never }, timeoutMs: 80, webTimeoutMs: 60,
+      store: { getCachedPrice: async () => null, persist } as unknown as StorePort }).price(req());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await pending).toMatchObject({ source: 'estimate', isEstimate: true,
+      propClosetSuggested: true, latencyMs: 0 });
+    expect(persist).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('honors a nonproduct resolved before delayed web success', async () => {
+    vi.useFakeTimers();
+    let complete!: (value: Awaited<ReturnType<SearchProvider['search']>>) => void;
+    const persist = vi.fn();
+    const pending = createPricing({ items, gemini: gemini({ ...product, notAProduct: true }),
+      search: { search: () => new Promise(resolve => { complete = resolve; }) },
+      store: { getCachedPrice: async () => null, persist } as unknown as StorePort }).price(req());
+    await vi.advanceTimersByTimeAsync(0);
+    complete({ priceCents: 4200, sources: [{ title: 'Fixture retailer', url: 'https://example.com/item' }], text: '$42' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await pending).toMatchObject({ source: 'estimate', propClosetSuggested: true });
+    expect(persist).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('does not wait for a hanging model before accepting web', async () => {
