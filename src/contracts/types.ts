@@ -137,7 +137,7 @@ export interface GameConfig {
   itemResolveMaxMs: number; // 12000 then prop closet
   lobbySettleMs: number; // 8000 (1000 in demo)
   lobbyMaxWaitMs: number; // 60000
-  dialTimeoutMs: number; // 45000
+  dialTimeoutMs: number; // 120000
   showItemMs: number; // 4000 (3000 in demo)
   drumrollMs: number; // 3000
   lightningDrumrollMs: number; // 2000

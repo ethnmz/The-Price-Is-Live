@@ -846,7 +846,7 @@ describe('call trouble', () => {
     sim.text(A, 'start');
     sim.fire('dial');
     expect(sim.all.filter((e) => e.type === 'DIAL')).toHaveLength(2);
-    expect(sim.timers.get(sim.timerId('dial') as string)).toBe(45_000);
+    expect(sim.timers.get(sim.timerId('dial') as string)).toBe(120_000);
     sim.go({ type: 'CALL_READY', callId: 'c2' });
     expect(sim.s.phase).toBe('lobby');
     expect(sim.s.callId).toBe('c2');

@@ -19,7 +19,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   itemResolveMaxMs: 12_000,
   lobbySettleMs: 8_000,
   lobbyMaxWaitMs: 60_000,
-  dialTimeoutMs: 45_000,
+  dialTimeoutMs: 120_000, // Chert can take ~30 s to start dialing a group, plus time to answer (seen 15 Nov)
   showItemMs: 4_000,
   drumrollMs: 3_000,
   lightningDrumrollMs: 2_000,
