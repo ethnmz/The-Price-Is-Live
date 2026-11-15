@@ -30,3 +30,19 @@
     Also verify this build's ElevenLabs voice/PCM format, Scribe events and permissions, Gemini model access, Atlas ping and writes, and stage framing on a real iPhone. These require real services and cannot be established by offline tests.
 
 11. After submission, stop the process and any Chert dev session, end active calls, and rotate Chert, LiveKit, ElevenLabs, Gemini, and Atlas credentials. Update only the private local env, then rerun doctor. Revoke old keys, remove temporary Atlas network rules, and delete private log captures. Keep the phone hash salt private; rotating it changes player identity hashes, so plan any retained-data migration first. Rotate immediately if a key was exposed.
+
+## Docker
+
+Optional backup deployment (SPEC §8.2). The image starts from `node:22-bookworm-slim`, runs `npm ci`, and starts the game with `npm start` as the non-root `node` user. No secrets are baked in; the env comes from your private local env file at run time through docker's `--env-file` option.
+
+```sh
+docker build -t price-is-live .
+docker run --rm --env-file <your private env file> price-is-live
+```
+
+Notes:
+
+- Keep the env file out of the image and out of git (`.dockerignore` already skips local env files). Run `npm run doctor` on the host first to check it.
+- To keep the audio cache and other output between runs, mount a volume, for example `-v "$PWD/out:/app/out"`.
+- The `chert` CLI steps (login, line setup, any `chert dev` session) still run on the host, not in the container.
+- Only one agent should use the line at once: stop the host process before starting the container.

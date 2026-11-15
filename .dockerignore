@@ -1,0 +1,10 @@
+node_modules
+out
+.cache
+.git
+.relay
+# local env files (secrets); the example file is safe to keep
+.env
+.env.*
+!.env.example
+*.log
