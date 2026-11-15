@@ -753,13 +753,6 @@ describe('items and pricing', () => {
 
 describe('captions follow the line being spoken', () => {
   it('round_score: winner caption first, stump caption only after the winner line is done', () => {
-    const sim = withPlayers([A, B, C]);
-    sendItems(sim, [A, B, C], [2000, 2000, 2000]);
-    connect(sim);
-    guessAll(sim, ['15', '10']);
-    sim.fire('drumroll');
-    sim.fire('revealhold'); // settles, so check the order with raw sends instead
-    sim.fire('scorehold'); // next round just to keep the sim moving
     const sim2 = withPlayers([A, B, C]);
     sendItems(sim2, [A, B, C], [2000, 2000, 2000]);
     connect(sim2);
@@ -775,10 +768,20 @@ describe('captions follow the line being spoken', () => {
     const speaks = out.filter((e) => e.type === 'SPEAK');
     expect(speaks).toHaveLength(1); // only the winner line starts now
     expect(sim2.s.caption?.text).toBe('score.winner|winner=Ben');
+    expect(sim2.timerId('scorehold')).toBeUndefined();
+    const winnerState = sim2.s;
+    expect(sim2.send({ type: 'SPEAK_DONE', speakId: 'unrelated' })).toMatchObject([{ type: 'LOG' }]);
+    expect(sim2.s).toBe(winnerState);
     sim2.playing = null;
     const next = sim2.send({ type: 'SPEAK_DONE', speakId: (speaks[0] as { speakId: string }).speakId });
     expect(next.filter((e) => e.type === 'SPEAK')).toHaveLength(1);
     expect(sim2.s.caption?.text).toMatch(/^score\.stump\|owner=Ann\|n=/);
+    const stumpState = sim2.s;
+    expect(sim2.send({ type: 'SPEAK_DONE', speakId: (speaks[0] as { speakId: string }).speakId })).toMatchObject([{ type: 'LOG' }]);
+    expect(sim2.s).toBe(stumpState); // a duplicate completion must not skip the stump line
+    expect(sim2.timerId('scorehold')).toBeUndefined();
+    sim2.settle();
+    expect(sim2.timerId('scorehold')).toBeDefined();
   });
 
   it('finale: drumroll, champion, thanks appear one after another', () => {
