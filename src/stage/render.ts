@@ -5,9 +5,9 @@
 import { createCanvas, type Canvas, type SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
 import { registerFonts } from './fonts';
-import { STAGE } from './theme';
+import { STAGE, applyTheme } from './theme';
 import { drawBackground } from './background';
-import { drawHud, drawBanner } from './hud';
+import { drawHud, drawBanner, drawJoinHint } from './hud';
 import { drawHost, type HostPose } from './host-sprite';
 import { createMouthTracker } from './mouth';
 import { drawTimerRing, drawReveal } from './overlays';
@@ -27,6 +27,8 @@ export interface Renderer {
 export interface RendererOpts {
   width: number;
   height: number;
+  /** Stage look: 'classic' (default) or 'odyssey'. Defaults to the STAGE_THEME environment variable. */
+  theme?: string;
   /** Tests only: make this layer throw. */
   failLayer?: LayerName;
   log?: (msg: string) => void;
@@ -47,6 +49,7 @@ function timerKey(t: StageState['timer']): string {
 }
 
 export function createRenderer(opts: RendererOpts): Renderer {
+  applyTheme(opts.theme ?? process.env.STAGE_THEME);
   registerFonts();
   const { width, height } = opts;
   const log = opts.log ?? ((m: string) => console.warn(m));
@@ -107,6 +110,7 @@ export function createRenderer(opts: RendererOpts): Renderer {
     }
     if (!finale) {
       if (s.banner) layer('hud', () => drawBanner(ctx, s));
+      if (s.joinHint) layer('hud', () => drawJoinHint(ctx, s));
       layer('podiums', () => drawPodiums(ctx, s, nowMs));
       layer('caption', () => drawCaption(ctx, s.caption, nowMs - t.caption, settled || s.hostSpeaking));
     }

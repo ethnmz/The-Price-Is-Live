@@ -23,6 +23,55 @@ export const FONTS = {
   body: '"Lilita One", "Nunito", "Arial Rounded MT Bold", "Arial", sans-serif',
 };
 
+// ---------- themes ----------
+// The stage has one look per theme. COLORS, SEAT_COLORS and FONTS are switched in place, so every
+// layer that reads them at draw time follows the theme; layers with a themed shape check `theme()`.
+export type ThemeName = 'classic' | 'odyssey';
+
+const CLASSIC = { colors: { ...COLORS }, seats: { ...SEAT_COLORS }, fonts: { ...FONTS } };
+
+/**
+ * Odyssey: HackUTA 2026's sea-voyage look (navy sea and sky, parchment, muted gold, terracotta).
+ * Inspired by the event site's palette and fonts; the art is drawn here, nothing is copied from it.
+ */
+const ODYSSEY = {
+  colors: {
+    navy: '#102F46', // deep sky and sea
+    curtain: '#1A3A52', // banner and panel fill (was curtain red)
+    gold: '#E8C97A',
+    cream: '#F6EDDF', // parchment
+    bulb: '#F3DFA6',
+    ink: '#0B2236',
+    alert: '#C45C3E', // terracotta
+    green: '#4E9A6B', // olive green
+    purple: '#3E7CA6', // slate blue (the "?" box)
+    gray: '#8FA3B3',
+  },
+  seats: { p1: '#C45C3E', p2: '#3E7CA6', p3: '#4E8C6A', p4: '#B8862F' } as Record<PlayerId, string>,
+  fonts: {
+    title: '"Cinzel", "Trajan Pro", "Georgia", serif',
+    body: '"Barlow Semi Condensed", "Arial Narrow", "Arial", sans-serif',
+  },
+};
+
+let current: ThemeName = 'classic';
+
+/** Which theme is active. */
+export function theme(): ThemeName {
+  return current;
+}
+
+/** Switch the stage's look. Unknown names fall back to classic. */
+export function applyTheme(name: string | undefined): ThemeName {
+  const t: ThemeName = name === 'odyssey' ? 'odyssey' : 'classic';
+  const src = t === 'odyssey' ? ODYSSEY : CLASSIC;
+  Object.assign(COLORS, src.colors);
+  Object.assign(SEAT_COLORS, src.seats);
+  Object.assign(FONTS, src.fonts);
+  current = t;
+  return t;
+}
+
 export interface Box { x: number; y: number; w: number; h: number }
 
 export const STAGE = { w: 960, h: 540, safeX: 48, safeY: 27 };

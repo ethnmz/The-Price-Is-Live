@@ -2,7 +2,7 @@
 // Captions carry the game when audio is silent, so they must always fit in CAPTION.maxLines lines.
 // TO VERIFY ON THE REAL LINE: the 65 ms per character pace is an estimate of Chip's voice; tune it
 // against the real ElevenLabs speech rate.
-import { CAPTION, COLORS, FONTS, LAYOUT } from './theme';
+import { CAPTION, COLORS, FONTS, LAYOUT, theme } from './theme';
 
 type Ctx = import('@napi-rs/canvas').SKRSContext2D;
 
@@ -115,9 +115,16 @@ export function drawCaption(
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  const odyssey = theme() === 'odyssey';
+  ctx.fillStyle = odyssey ? 'rgba(11,34,54,0.88)' : 'rgba(0,0,0,0.7)';
   roundRect(ctx, box.x, box.y, box.w, box.h, 14);
   ctx.fill();
+  if (odyssey) {
+    ctx.strokeStyle = 'rgba(232,201,122,0.6)';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, box.x + 4, box.y + 4, box.w - 8, box.h - 8, 11);
+    ctx.stroke();
+  }
 
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';

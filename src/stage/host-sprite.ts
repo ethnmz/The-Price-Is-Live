@@ -1,7 +1,7 @@
 // Chip Dollar, the game show host, drawn only with vector shapes (docs/SPEC.md 13.3, 13.4).
 // Pure: the picture depends only on (pose, mouth, nowMs). He stays inside LAYOUT.host.
 import type { SKRSContext2D } from '@napi-rs/canvas';
-import { COLORS, LAYOUT } from './theme';
+import { COLORS, LAYOUT, theme } from './theme';
 import type { MouthShape } from './mouth';
 
 export type HostPose = 'idle' | 'talking' | 'reveal' | 'celebrate';
@@ -263,6 +263,28 @@ function head(ctx: Ctx, mouth: MouthShape, blink: boolean): void {
 }
 
 /** Draw Chip Dollar inside LAYOUT.host. Leaves the context as it found it. */
+/** Odyssey theme: a gold-and-olive laurel wreath around the crown of the head. */
+function wreath(ctx: Ctx): void {
+  ctx.save();
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 7; i++) {
+      const a = Math.PI + side * (0.25 + i * 0.2) - (side < 0 ? 0 : 0);
+      const ang = side < 0 ? Math.PI + 0.15 + i * 0.2 : -0.15 - i * 0.2;
+      const x = CX + Math.cos(ang) * (HEAD_R + 2);
+      const y = HEAD_Y - 14 + Math.sin(ang) * (HEAD_R - 6) * 0.9;
+      void a;
+      ctx.fillStyle = i % 2 ? '#4E8C6A' : COLORS.gold;
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 10, 4.5, ang + (side < 0 ? 0.9 : -0.9), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 export function drawHost(ctx: Ctx, a: { pose: HostPose; mouth: MouthShape; nowMs: number }): void {
   const { pose, mouth, nowMs } = a;
   const bob = pose === 'talking' ? Math.round(1 + Math.sin(nowMs / 120)) : 0; // 0..2 px
@@ -292,6 +314,7 @@ export function drawHost(ctx: Ctx, a: { pose: HostPose; mouth: MouthShape; nowMs
   torso(ctx);
   bowTie(ctx);
   head(ctx, mouth, isBlinking(nowMs));
+  if (theme() === 'odyssey') wreath(ctx);
   handCircle(ctx, leftHand);
   mic(ctx, rightHand, tilt);
   ctx.restore();

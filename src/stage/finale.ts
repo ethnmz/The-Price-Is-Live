@@ -112,7 +112,8 @@ function rng(seed: number): () => number {
   };
 }
 
-const CONFETTI_COLORS = [COLORS.gold, COLORS.alert, COLORS.green, COLORS.purple, COLORS.cream, SEAT_COLORS.p2, SEAT_COLORS.p3];
+// Read at draw time so the confetti follows the stage theme.
+const confettiColors = () => [COLORS.gold, COLORS.alert, COLORS.green, COLORS.purple, COLORS.cream, SEAT_COLORS.p2, SEAT_COLORS.p3];
 
 function drawConfetti(ctx: SKRSContext2D, ms: number): void {
   if (ms < 0 || ms > CONFETTI_MS) return;
@@ -125,7 +126,8 @@ function drawConfetti(ctx: SKRSContext2D, ms: number): void {
     const swayAmp = 10 + rand() * 30;
     const swayRate = 1 + rand() * 3;
     const size = 5 + rand() * 6;
-    const color = CONFETTI_COLORS[Math.floor(rand() * CONFETTI_COLORS.length)];
+    const palette = confettiColors();
+    const color = palette[Math.floor(rand() * palette.length)];
     const spin = rand() * Math.PI * 2;
     const t = (ms - delay) / 1000;
     if (t < 0) continue;

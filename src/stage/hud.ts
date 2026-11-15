@@ -2,7 +2,7 @@
 // Each is drawn only when its StageState field is set.
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
-import { COLORS, FONTS, LAYOUT, SEAT_COLORS, type Box } from './theme';
+import { COLORS, FONTS, LAYOUT, SEAT_COLORS, theme, type Box } from './theme';
 
 function pill(ctx: SKRSContext2D, b: Box, fill: string, stroke?: string): void {
   ctx.beginPath();
@@ -48,13 +48,33 @@ function drawTurnStrip(ctx: SKRSContext2D, s: StageState): void {
 
 function drawMystery(ctx: SKRSContext2D, owner: string): void {
   const b = LAYOUT.mysteryCard;
-  ctx.beginPath();
-  ctx.roundRect(b.x, b.y, b.w, b.h, 14);
-  ctx.fillStyle = COLORS.cream;
-  ctx.fill();
-  ctx.strokeStyle = COLORS.gold;
-  ctx.lineWidth = 4;
-  ctx.stroke();
+  if (theme() === 'odyssey') {
+    // a parchment scroll: the sheet plus a rolled edge at the top and bottom
+    ctx.fillStyle = COLORS.cream;
+    ctx.fillRect(b.x + 8, b.y + 8, b.w - 16, b.h - 16);
+    ctx.strokeStyle = COLORS.ink;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(b.x + 8, b.y + 8, b.w - 16, b.h - 16);
+    for (const y of [b.y, b.y + b.h - 16]) {
+      const g = ctx.createLinearGradient(0, y, 0, y + 16);
+      g.addColorStop(0, '#D9C9AE');
+      g.addColorStop(0.5, COLORS.cream);
+      g.addColorStop(1, '#C9B593');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.roundRect(b.x, y, b.w, 16, 8);
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else {
+    ctx.beginPath();
+    ctx.roundRect(b.x, b.y, b.w, b.h, 14);
+    ctx.fillStyle = COLORS.cream;
+    ctx.fill();
+    ctx.strokeStyle = COLORS.gold;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  }
   const q = { x: b.x + b.w / 2 - 40, y: b.y + 18, w: 80, h: 80 };
   ctx.fillStyle = COLORS.purple;
   ctx.beginPath();
@@ -63,6 +83,16 @@ function drawMystery(ctx: SKRSContext2D, owner: string): void {
   text(ctx, '?', q.x + q.w / 2, q.y + q.h / 2 + 3, `56px ${FONTS.title}`, COLORS.gold);
   text(ctx, 'MYSTERY ITEM', b.x + b.w / 2, b.y + 128, `20px ${FONTS.title}`, COLORS.ink, 'center', b.w - 20);
   text(ctx, `from ${owner}`, b.x + b.w / 2, b.y + 158, `22px ${FONTS.body}`, COLORS.ink, 'center', b.w - 20);
+}
+
+/** The join instruction above the host. Drawn after the host so his hair or wreath never covers it. */
+export function drawJoinHint(ctx: SKRSContext2D, s: StageState): void {
+  if (!s.joinHint) return;
+  const b = LAYOUT.joinHint;
+  ctx.save();
+  pill(ctx, b, COLORS.cream, COLORS.gold);
+  text(ctx, s.joinHint, b.x + b.w / 2, b.y + b.h / 2 + 1, `24px ${FONTS.body}`, COLORS.ink, 'center', b.w - 30);
+  ctx.restore();
 }
 
 /** The gold banner ("CLOSEST WITHOUT GOING OVER WINS"). Drawn after the host so he never covers it. */
@@ -92,11 +122,6 @@ export function drawHud(ctx: SKRSContext2D, s: StageState, nowMs: number): void 
     text(ctx, `TIME LEFT ${formatClock(s.capRemainingMs)}`, b.x + b.w / 2, b.y + b.h / 2 + 1, `18px ${FONTS.title}`, '#fff', 'center', b.w - 20);
   }
   drawTurnStrip(ctx, s);
-  if (s.joinHint) {
-    const b = LAYOUT.joinHint;
-    pill(ctx, b, COLORS.cream, COLORS.gold);
-    text(ctx, s.joinHint, b.x + b.w / 2, b.y + b.h / 2 + 1, `24px ${FONTS.body}`, COLORS.ink, 'center', b.w - 30);
-  }
   if (s.mysteryOwner) drawMystery(ctx, s.mysteryOwner);
   if (s.fallbackBadge) {
     const b = LAYOUT.badge;
