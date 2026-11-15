@@ -5,9 +5,9 @@
 // SEAMS for later tasks (search for "SEAM"):
 //  - hard clock + lightning mode: TICK handler and beforeNextRound()
 //  - auto TEXT MODE: recordSilent() (silentWindows) and guess window length in guessMs()
-//  - camera / voice item fallbacks: resolveItem() branch "no item text"
 //
 // TO VERIFY ON THE REAL LINE:
+//  - Camera labels identify the held item in a group call, and item.ask captures the owner’s answer.
 //  - SPEAK_DONE really arrives for every SPEAK (the runner also sends it when speaking fails).
 //  - The real parseGuess returns 'yes' / 'no' / 'pass' for the short phrases the fake one understands.
 import type { Effect, EngineDeps, GameEvent, Reduce } from '../contracts/events';
@@ -54,6 +54,11 @@ function ignoredLog(state: GameState, event: GameEvent, why: string): Effect {
 function dispatch(c: Ctx, ev: GameEvent): void {
   const s = c.s;
   if (s.phase === 'boot' && ev.type !== 'BOOT') return ignore(c, 'not booted');
+  if (s.phase === 'item_resolve' && c.at - s.phaseEnteredAt >= c.cfg.itemResolveMaxMs) {
+    propCloset(c);
+    if (ev.type === 'TEXT_RECEIVED') onText(c, ev.phone, ev.text);
+    return;
+  }
   switch (ev.type) {
     case 'BOOT':
       if (s.phase !== 'boot') return ignore(c, 'already booted');
@@ -90,7 +95,7 @@ function dispatch(c: Ctx, ev: GameEvent): void {
     }
     case 'PRICE_READY': return onPrice(c, ev.itemId, ev.result);
     case 'PRICE_FAILED': return onPrice(c, ev.itemId, null);
-    case 'FRAME_ID_READY': return ignore(c, 'camera ID is a later task'); // SEAM(camera)
+    case 'FRAME_ID_READY': return onCamera(c, ev.itemId, ev.label, ev.confidence);
     case 'TICK': return onTick(c);
   }
 }
@@ -158,6 +163,12 @@ function checkLightning(c: Ctx): void {
 function run(c: Ctx, next: Next): void {
   const s = c.s;
   switch (next) {
+    case 'item_voice':
+      if (s.phase !== 'item_resolve' || !hasTimer(s, 'itemvoice')) return;
+      cancelTimers(c, 'itemvoice');
+      startTimer(c, 'itemvoice', 8000);
+      listen(c, true);
+      return;
     case 'lobby': if (s.phase === 'connected') enterLobby(c); return;
     case 'start_round': if (s.phase === 'rules') startRound(c); return;
     case 'item_resolve':
@@ -199,7 +210,10 @@ function onTimer(c: Ctx, kind: TimerKind): void {
       cancelTimers(c);
       say(c, 'lobby.giveup');
       return enterEnding(c);
-    case 'price': case 'itemwait':
+    case 'itemwait':
+      if (s.phase === 'item_resolve') askForItem(c);
+      return;
+    case 'price': case 'itemmax': case 'itemvoice':
       if (s.phase === 'item_resolve' && s.currentItem && !s.currentItem.price) propCloset(c);
       return;
     case 'show': if (s.phase === 'show_item') startGuess(c, 0); return;
@@ -314,9 +328,13 @@ function onItemText(c: Ctx, player: Player, text: string): void {
   sendText(c, player.phone, 'item', MSG.itemReceived(rawText));
   const cur = s.currentItem;
   if (!cur || cur.itemId !== itemId) return;
-  cur.request = { ...cur.request, rawText };
+  cur.request = { itemId, ownerId: player.id, origin: 'text', rawText };
   if (s.phase === 'item_resolve') {
     cancelTimers(c, 'itemwait');
+    cancelTimers(c, 'itemvoice');
+    cancelTimers(c, 'price');
+    dropQueuedSpeech(s);
+    listen(c, false);
     resolveItem(c);
   }
 }
@@ -458,23 +476,60 @@ function resolveItem(c: Ctx): void {
   const s = c.s;
   const cur = s.currentItem;
   if (!cur || cur.price) return;
+  if (!hasTimer(s, 'itemmax')) {
+    startTimer(c, 'itemmax', Math.max(0, c.cfg.itemResolveMaxMs - (c.at - s.phaseEnteredAt)));
+  }
   const early = s.earlyPrices[cur.itemId];
   if (early && !early.propClosetSuggested) {
     cancelTimers(c, 'price');
     cancelTimers(c, 'itemwait');
+    cancelTimers(c, 'itemvoice');
+    cancelTimers(c, 'itemmax');
+    dropQueuedSpeech(s);
+    listen(c, false);
     cur.price = early;
     return showItem(c);
   }
   if (early?.propClosetSuggested || s.earlyFailed[cur.itemId]) return propCloset(c);
-  if (s.pendingItemTexts[cur.ownerId]) {
+  if (cur.request.rawText) {
     if (hasTimer(s, 'price')) return;
     cancelTimers(c, 'itemwait');
     say(c, 'item.pricing');
     startTimer(c, 'price', c.cfg.priceTimeoutMs);
     return;
   }
-  // SEAM(camera): IDENTIFY_FROM_CAMERA, then ask out loud, go here. For now: wait, then prop closet.
-  if (!hasTimer(s, 'itemwait')) startTimer(c, 'itemwait', c.cfg.itemWaitMs);
+  if (hasTimer(s, 'itemwait') || hasTimer(s, 'itemvoice')) return;
+  say(c, 'item.camera', { owner: nameOf(s, cur.ownerId) });
+  c.fx.push({ type: 'IDENTIFY_FROM_CAMERA', itemId: cur.itemId, ownerId: cur.ownerId });
+  startTimer(c, 'itemwait', c.cfg.itemWaitMs);
+}
+
+function onCamera(c: Ctx, itemId: string, label: string | null, confidence: number): void {
+  const cur = c.s.currentItem;
+  if (c.s.phase !== 'item_resolve' || cur?.itemId !== itemId || !hasTimer(c.s, 'itemwait')) {
+    return ignore(c, 'camera result no longer needed');
+  }
+  cancelTimers(c, 'itemwait');
+  if (label?.trim() && confidence >= 0.5) return priceFallback(c, 'camera', label);
+  askForItem(c);
+}
+
+function askForItem(c: Ctx): void {
+  cancelTimers(c, 'itemwait');
+  say(c, 'item.ask');
+  startTimer(c, 'itemvoice', 8000);
+  c.s.afterSpeech = 'item_voice';
+}
+
+function priceFallback(c: Ctx, origin: 'camera' | 'voice', rawText: string): void {
+  const cur = c.s.currentItem;
+  if (!cur) return;
+  cancelTimers(c, 'itemvoice');
+  dropQueuedSpeech(c.s);
+  listen(c, false);
+  cur.request = { itemId: cur.itemId, ownerId: cur.ownerId, origin, rawText };
+  c.fx.push({ type: 'PRICE_ITEM', request: { ...cur.request } });
+  resolveItem(c);
 }
 
 function propCloset(c: Ctx): void {
@@ -483,6 +538,10 @@ function propCloset(c: Ctx): void {
   if (!cur) return;
   cancelTimers(c, 'price');
   cancelTimers(c, 'itemwait');
+  cancelTimers(c, 'itemvoice');
+  cancelTimers(c, 'itemmax');
+  dropQueuedSpeech(s);
+  listen(c, false);
   const prop = c.deps.propItem();
   say(c, 'item.propcloset');
   cur.request = { itemId: cur.itemId, ownerId: cur.ownerId, origin: 'prop_closet', rawText: prop.name };
@@ -550,6 +609,9 @@ function onSpeechFinal(c: Ctx, text: string, confidence: number): void {
     case 'lobby':
       if (START_SPOKEN_RE.test(text) && s.players.length >= c.cfg.minPlayers) return enterRules(c);
       return ignore(c, 'nothing to act on');
+    case 'item_resolve':
+      if (!hasTimer(s, 'itemvoice')) return ignore(c, 'not awaiting an item answer');
+      return priceFallback(c, 'voice', text);
     case 'guess_listen': return listenSpeech(c, text, confidence);
     case 'guess_confirm': return confirmSpeech(c, text, confidence);
     case 'rematch_offer':

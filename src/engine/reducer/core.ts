@@ -12,12 +12,12 @@ import { last4 } from '../../contracts/money';
 import type { GameConfig, GameState, Player, PlayerId, PriceResult } from '../../contracts/types';
 
 export type TimerKind =
-  | 'dial' | 'lobbysettle' | 'lobbymax' | 'price' | 'itemwait' | 'show' | 'guess' | 'confirm'
+  | 'itemmax' | 'itemvoice' | 'dial' | 'lobbysettle' | 'lobbymax' | 'price' | 'itemwait' | 'show' | 'guess' | 'confirm'
   | 'drumroll' | 'revealhold' | 'scorehold' | 'rematch';
 
 /** What to do when the host has finished the lines that are queued right now. */
 export type Next =
-  | 'lobby' | 'start_round' | 'item_resolve' | 'guess_listen' | 'relisten' | 'confirm_listen' | 'after_guess'
+  | 'item_voice' | 'lobby' | 'start_round' | 'item_resolve' | 'guess_listen' | 'relisten' | 'confirm_listen' | 'after_guess'
   | 'score_done' | 'to_rematch' | 'rematch_listen' | 'end_call';
 
 /** Fields only the engine reads. Other lanes only see GameState. */
