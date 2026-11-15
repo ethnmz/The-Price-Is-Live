@@ -5,7 +5,8 @@
 // credit line and recap strip stay readable after video compression.
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
-import { COLORS, CREDIT_LINE, FONTS, SEAT_COLORS, STAGE, podiumXs, PODIUM_W, LAYOUT, type Box } from './theme';
+import { COLORS, CREDIT_LINE, FONTS, SEAT_COLORS, STAGE, podiumXs, PODIUM_W, LAYOUT, theme, type Box } from './theme';
+import { bevelBox, ribbon, sparkle, textFx } from './fx';
 
 // ---------- score fly ----------
 
@@ -139,7 +140,19 @@ function drawConfetti(ctx: SKRSContext2D, ms: number): void {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(spin + t * swayRate * 2);
-    ctx.fillRect(-size / 2, -size / 4, size, size / 2);
+    if (theme() === 'odyssey') {
+      // laurel leaves and gold coins instead of paper confetti
+      if (i % 3 === 0) {
+        ctx.fillStyle = '#E8C97A';
+        ctx.beginPath(); ctx.ellipse(0, 0, size * 0.55, size * 0.55 * Math.abs(Math.cos(t * 4 + spin)), 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(-1, -size * 0.3, 2, 2);
+      } else {
+        ctx.fillStyle = i % 2 ? '#4E8C6A' : '#7FB089';
+        ctx.beginPath(); ctx.ellipse(0, 0, size * 0.7, size * 0.28, 0, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      ctx.fillRect(-size / 2, -size / 4, size, size / 2);
+    }
     ctx.restore();
   }
   ctx.restore();
@@ -148,19 +161,19 @@ function drawConfetti(ctx: SKRSContext2D, ms: number): void {
 function drawBanner(ctx: SKRSContext2D, s: StageState): void {
   const b = FINALE_BOXES.banner;
   const text = fitText(ctx, bannerText(s.finale!.champion), FONTS.title, 44, 16, b.w - 24);
+  const font = ctx.font;
   ctx.save();
-  ctx.fillStyle = COLORS.curtain;
+  // V2: a navy ribbon with gold trim, gold lettering and a glint
+  ribbon(ctx, { x: b.x + 26, y: b.y, w: b.w - 52, h: b.h }, COLORS.curtain, 26);
   ctx.strokeStyle = COLORS.gold;
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.roundRect(b.x, b.y, b.w, b.h, 14);
-  ctx.fill();
+  ctx.roundRect(b.x + 30, b.y + 4, b.w - 60, b.h - 8, 5);
   ctx.stroke();
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = COLORS.gold;
-  ctx.fillText(text, b.x + b.w / 2, b.y + b.h / 2 + 2);
+  textFx(ctx, text, b.x + b.w / 2, b.y + b.h / 2 + 2, { font, fill: 'gold', base: COLORS.gold, stroke: '#1A0F02', strokeW: 5, glow: 'rgba(255,210,120,0.7)', glowBlur: 14 });
   ctx.restore();
+  sparkle(ctx, b.x + b.w - 70, b.y + 14, 9, 0.9);
+  sparkle(ctx, b.x + 70, b.y + b.h - 12, 6, 0.7);
 }
 
 function drawBoard(ctx: SKRSContext2D, s: StageState, ms: number): void {
@@ -177,13 +190,16 @@ function drawBoard(ctx: SKRSContext2D, s: StageState, ms: number): void {
     const k = easeOut((ms - i * 80) / SLIDE_MS);
     const x = b.x - (1 - k) * (b.x + b.w);
     ctx.globalAlpha = k;
-    ctx.fillStyle = first ? COLORS.gold : COLORS.navy;
-    ctx.strokeStyle = first ? COLORS.cream : SEAT_COLORS[r.id];
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.roundRect(x, y, b.w, h, 12);
-    ctx.fill();
-    ctx.stroke();
+    // V2: each row is a lit, beveled plate; the winner's is gold with a glow
+    if (first) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,214,120,0.8)';
+      ctx.shadowBlur = 24;
+      bevelBox(ctx, { x, y, w: b.w, h }, COLORS.gold, { r: 12, gloss: 0.35, stroke: COLORS.cream, strokeW: 3 });
+      ctx.restore();
+    } else {
+      bevelBox(ctx, { x, y, w: b.w, h }, COLORS.navy, { r: 12, shadow: 10, gloss: 0.12, stroke: SEAT_COLORS[r.id], strokeW: 3 });
+    }
     const textColor = first ? COLORS.ink : COLORS.cream;
     const px = first ? 34 : 26;
     ctx.textBaseline = 'middle';

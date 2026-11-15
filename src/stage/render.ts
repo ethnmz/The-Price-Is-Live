@@ -14,8 +14,9 @@ import { drawTimerRing, drawReveal } from './overlays';
 import { drawPodiums } from './podium';
 import { drawCaption } from './captions';
 import { drawScoreFly, drawFinale } from './finale';
+import { finish } from './fx';
 
-export type LayerName = 'background' | 'hud' | 'host' | 'timer' | 'podiums' | 'caption' | 'scoreFly' | 'reveal' | 'finale';
+export type LayerName = 'background' | 'hud' | 'host' | 'timer' | 'podiums' | 'caption' | 'scoreFly' | 'reveal' | 'finale' | 'finish';
 
 export interface Renderer {
   render(s: StageState, nowMs: number, mouthLevel: number | null): Uint8Array;
@@ -120,6 +121,8 @@ export function createRenderer(opts: RendererOpts): Renderer {
       layer('reveal', () => drawReveal(ctx, reveal, nowMs - t.reveal, s.lightning));
     }
     if (s.finale) layer('finale', () => drawFinale(ctx, s, nowMs - t.phase));
+    // V2 finish: vignette and a light film grain over the whole frame
+    layer('finish', () => finish(ctx, nowMs));
     ctx.restore();
     if (scaled) letterbox();
   }

@@ -3,13 +3,11 @@
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
 import { COLORS, FONTS, LAYOUT, SEAT_COLORS, theme, type Box } from './theme';
+import { bevelBox, grain, ribbon, sparkle } from './fx';
 
+/** V2 pill: a lit, glossy capsule with a soft shadow. */
 function pill(ctx: SKRSContext2D, b: Box, fill: string, stroke?: string): void {
-  ctx.beginPath();
-  ctx.roundRect(b.x, b.y, b.w, b.h, b.h / 2);
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
+  bevelBox(ctx, b, fill, { r: b.h / 2, shadow: 8, gloss: 0.28, stroke: stroke ?? undefined, strokeW: stroke ? 2 : 1.5 });
 }
 
 function text(ctx: SKRSContext2D, s: string, x: number, y: number, font: string, color: string, align: 'left' | 'center' | 'right' = 'center', maxW?: number): void {
@@ -75,12 +73,39 @@ function drawMystery(ctx: SKRSContext2D, owner: string): void {
     ctx.lineWidth = 4;
     ctx.stroke();
   }
-  const q = { x: b.x + b.w / 2 - 40, y: b.y + 18, w: 80, h: 80 };
-  ctx.fillStyle = COLORS.purple;
-  ctx.beginPath();
-  ctx.roundRect(q.x, q.y, q.w, q.h, 12);
-  ctx.fill();
+  if (theme() === 'odyssey') grain(ctx, { x: b.x + 8, y: b.y + 16, w: b.w - 16, h: b.h - 32 }, 0.18);
+  const q = { x: b.x + b.w / 2 - 40, y: b.y + 20, w: 80, h: 80 };
+  if (theme() === 'odyssey') {
+    // a wax seal: a round, glossy medallion with a raised rim
+    const cx = q.x + q.w / 2, cy = q.y + q.h / 2;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 3;
+    const wax = ctx.createRadialGradient(cx - 12, cy - 14, 4, cx, cy, 42);
+    wax.addColorStop(0, '#6FA6CC');
+    wax.addColorStop(0.6, COLORS.purple);
+    wax.addColorStop(1, '#1E4A6A');
+    ctx.fillStyle = wax;
+    ctx.beginPath();
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      const r = 40 + (i % 2 ? 2 : -1);
+      ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    bevelBox(ctx, q, COLORS.purple, { r: 12, shadow: 8, gloss: 0.3 });
+  }
   text(ctx, '?', q.x + q.w / 2, q.y + q.h / 2 + 3, `56px ${FONTS.title}`, COLORS.gold);
+  sparkle(ctx, q.x + q.w - 10, q.y + 12, 6, 0.9);
   text(ctx, 'MYSTERY ITEM', b.x + b.w / 2, b.y + 128, `20px ${FONTS.title}`, COLORS.ink, 'center', b.w - 20);
   text(ctx, `from ${owner}`, b.x + b.w / 2, b.y + 158, `22px ${FONTS.body}`, COLORS.ink, 'center', b.w - 20);
 }
@@ -100,10 +125,8 @@ export function drawBanner(ctx: SKRSContext2D, s: StageState): void {
   if (!s.banner) return;
   const b = LAYOUT.banner;
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.45)';
-  ctx.shadowBlur = 12;
-  pill(ctx, b, COLORS.gold, COLORS.cream);
-  ctx.shadowBlur = 0;
+  ribbon(ctx, b, COLORS.gold, 24);
+  text(ctx, s.banner, b.x + b.w / 2, b.y + b.h / 2 + 2, `22px ${FONTS.title}`, 'rgba(255,255,255,0.45)', 'center', b.w - 30);
   text(ctx, s.banner, b.x + b.w / 2, b.y + b.h / 2 + 1, `22px ${FONTS.title}`, COLORS.ink, 'center', b.w - 30);
   ctx.restore();
 }

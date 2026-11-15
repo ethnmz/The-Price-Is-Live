@@ -2,6 +2,7 @@
 // Pure: the picture depends only on (pose, mouth, nowMs). He stays inside LAYOUT.host.
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import { COLORS, LAYOUT, theme } from './theme';
+import { shade } from './fx';
 import type { MouthShape } from './mouth';
 
 export type HostPose = 'idle' | 'talking' | 'reveal' | 'celebrate';
@@ -44,13 +45,13 @@ function handCircle(ctx: Ctx, p: Pt): void {
 function arm(ctx: Ctx, from: Pt, elbow: Pt, hand: Pt): void {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  for (const [w, c] of [[22, COLORS.ink], [14, COLORS.alert]] as const) {
+  for (const [w, c, dy] of [[22, COLORS.ink, 0], [14, shade(COLORS.alert, -0.12), 0], [5, shade(COLORS.alert, 0.3), -3]] as const) {
     ctx.strokeStyle = c;
     ctx.lineWidth = w;
     ctx.beginPath();
-    ctx.moveTo(from[0], from[1]);
-    ctx.lineTo(elbow[0], elbow[1]);
-    ctx.lineTo(hand[0], hand[1]);
+    ctx.moveTo(from[0], from[1] + dy);
+    ctx.lineTo(elbow[0], elbow[1] + dy);
+    ctx.lineTo(hand[0], hand[1] + dy);
     ctx.stroke();
   }
 }
@@ -83,7 +84,13 @@ function mic(ctx: Ctx, hand: Pt, tilt: number): void {
 function torso(ctx: Ctx): void {
   ctx.lineWidth = 4;
   ctx.strokeStyle = COLORS.ink;
-  ctx.fillStyle = COLORS.alert;
+  // V2: the jacket is lit from above and from the sun behind, darker toward the hem and sides
+  const jacket = ctx.createLinearGradient(CX - 72, 0, CX + 72, 0);
+  jacket.addColorStop(0, shade(COLORS.alert, -0.3));
+  jacket.addColorStop(0.35, shade(COLORS.alert, 0.12));
+  jacket.addColorStop(0.65, shade(COLORS.alert, 0.05));
+  jacket.addColorStop(1, shade(COLORS.alert, -0.35));
+  ctx.fillStyle = jacket;
   ctx.beginPath();
   ctx.moveTo(CX - 56, 246);
   ctx.lineTo(CX + 56, 246);
@@ -228,7 +235,11 @@ function drawMouth(ctx: Ctx, mouth: MouthShape): void {
 }
 
 function head(ctx: Ctx, mouth: MouthShape, blink: boolean): void {
-  ctx.fillStyle = SKIN;
+  const face = ctx.createRadialGradient(CX - 14, HEAD_Y - 18, 6, CX, HEAD_Y, HEAD_R + 6);
+  face.addColorStop(0, '#FFE2BC');
+  face.addColorStop(0.7, SKIN);
+  face.addColorStop(1, '#D99A62');
+  ctx.fillStyle = face;
   ctx.strokeStyle = COLORS.ink;
   ctx.lineWidth = 4;
   ctx.fillRect(CX - 14, HEAD_Y + 34, 28, 26); // neck
@@ -308,6 +319,14 @@ export function drawHost(ctx: Ctx, a: { pose: HostPose; mouth: MouthShape; nowMs
     rightElbow = [CX + 92, 214];
     rightHand = [CX + 86, 148];
     tilt = 0.2;
+  }
+  if (theme() === 'odyssey') {
+    // the setting sun sits right behind Chip: a warm halo separates him from the sky
+    const halo = ctx.createRadialGradient(CX, 250, 30, CX, 250, 190);
+    halo.addColorStop(0, 'rgba(255,214,140,0.35)');
+    halo.addColorStop(1, 'rgba(255,214,140,0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(CX - 200, 60, 400, 300);
   }
   arm(ctx, SHOULDER_L, leftElbow, leftHand);
   arm(ctx, SHOULDER_R, rightElbow, rightHand);
