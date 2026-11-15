@@ -63,9 +63,13 @@ const TERMINAL = new Set(['ended', 'failed', 'canceled', 'cancelled', 'completed
 const str = z.union([z.string(), z.number()]).transform(String);
 const callIdBody = z.object({ data: z.object({ id: str }) });
 const callBody = z.object({
-  data: z.object({ status: str.optional(), end_reason: z.string().nullish() }).passthrough(),
+  data: z.object({ status: str.optional(), end_reason: z.string().nullish(), terminal_detail: z.string().nullish(), terminal_reason: z.string().nullish() }).passthrough(),
 });
 const eventsBody = z.object({ data: z.array(z.unknown()) });
+/** GET /calls/{id}/events answers { data: { call_id, events: [...] } } (seen 15 Nov 2026); older shapes used { data: [...] }. */
+const callEventsBody = z.object({
+  data: z.union([z.array(z.unknown()), z.object({ events: z.array(z.unknown()) }).passthrough(), z.object({ items: z.array(z.unknown()) }).passthrough()]),
+});
 /** GET /shared-messages answers { data: { items: [...] } }; older shapes used { data: [...] }. */
 const messagesBody = z.object({ data: z.union([z.array(z.unknown()), z.object({ items: z.array(z.unknown()) })]) });
 
@@ -214,17 +218,19 @@ export function createChertClient(cfg: ChertConfig): ChertClient {
       return {
         status,
         terminal: TERMINAL.has(status.toLowerCase()),
-        endReason: p.success ? (p.data.data.end_reason ?? null) : null,
+        endReason: p.success ? (p.data.data.end_reason ?? p.data.data.terminal_detail ?? p.data.data.terminal_reason ?? null) : null,
       };
     },
 
     async getCallEvents(callId) {
       const json = await callsRequest('GET', `/calls/${encodeURIComponent(callId)}/events`);
-      const p = eventsBody.safeParse(json);
+      const p = callEventsBody.safeParse(json);
       if (!p.success) return [];
+      const d = p.data.data;
+      const list = Array.isArray(d) ? d : 'events' in d ? (d.events as unknown[]) : (d.items as unknown[]);
       const out: { type: string }[] = [];
-      for (const e of p.data.data) {
-        const t = e && typeof e === 'object' ? pick(e as Record<string, unknown>, ['type', 'event', 'name']) : undefined;
+      for (const e of list) {
+        const t = e && typeof e === 'object' ? pick(e as Record<string, unknown>, ['type', 'event_type', 'event', 'name']) : undefined;
         if (typeof t === 'string') out.push({ type: t });
       }
       return out;

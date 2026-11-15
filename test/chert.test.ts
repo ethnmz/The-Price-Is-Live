@@ -25,6 +25,16 @@ const hdr = (c: Call) => c.init.headers as Record<string, string>;
 const callArgs = { livekitUrl: 'wss://x.test', participantToken: 'jwt', agentIdentity: 'host-agent', idemKey: 'idem-key-1' };
 
 describe('chert client', () => {
+  it('reads call events in the real { data: { events } } shape, so bridge_ready is seen', async () => {
+    const body = { data: { call_id: 'c1', events: [
+      { id: 'e1', type: 'dialing', at: '2026-11-15T07:59:35Z', sequence: 2, source: 'worker' },
+      { id: 'e2', type: 'bridge_ready', at: '2026-11-15T07:59:43Z', sequence: 5, source: 'worker' },
+    ] }, request_id: 'r' };
+    const { f } = fakeFetch([json(body)]);
+    const client = createChertClient({ ...cfg, fetch: f });
+    expect((await client.getCallEvents('c1')).map((e) => e.type)).toEqual(['dialing', 'bridge_ready']);
+  });
+
   it('reads the real shared-messages shape: data.items with masked senders', async () => {
     // As returned by Chert's shared line on 15 Nov 2026 (numbers made up here).
     const body = { data: { items: [
