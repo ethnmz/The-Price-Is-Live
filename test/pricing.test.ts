@@ -99,6 +99,7 @@ describe('pricing pipeline', () => {
     const sources = [...webResult.sources, { title: 'Second store', url: 'https://example.org/widget' }];
     expect((await price(sources, '$42.00 and $43.00')).confidence).toBe(0.9);
     expect((await price(sources, '$42.00 and $99.00')).confidence).toBe(0.75);
+    expect((await price(sources, '$34.00 and $50.00')).confidence).toBe(0.75);
     expect((await price([], '$42.00')).source).toBe('estimate');
   });
 

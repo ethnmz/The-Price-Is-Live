@@ -79,8 +79,10 @@ export function createPricing(a: {
           const agreeing = [...web.text.matchAll(/\$\s*(\d[\d,]*(?:\.\d{1,2})?)/gu)]
             .map(m => Math.round(Number(m[1]!.replace(/,/gu, '')) * 100))
             .filter(n => n > 0 && Math.abs(n - price) / Math.max(1, price) <= 0.2);
+          const hasAgreeingPair = agreeing.some((first, i) => agreeing.slice(i + 1)
+            .some(second => Math.abs(first - second) / Math.min(first, second) <= 0.2));
           return finish({ itemId: req.itemId, displayName: titleCase(clean), priceCents: price,
-            source: 'web', confidence: new Set(web.sources.map(s => s.url)).size >= 2 && agreeing.length >= 2 ? 0.9 : 0.75,
+            source: 'web', confidence: new Set(web.sources.map(s => s.url)).size >= 2 && hasAgreeingPair ? 0.9 : 0.75,
             isEstimate: false, latencyMs: 0,
             evidence: web.sources.map(s => ({ kind: 'web', label: s.title, url: s.url })),
           });
