@@ -5,7 +5,7 @@
 // - the Chert event that means "bridge joined" is really named `bridge_ready`
 // - a terminal getCall status shows up quickly after the last player hangs up
 // - a second dial() right after end() is accepted (the line is free again)
-// - latestCallerFrames() is null for now (camera capture is an optional later task)
+// - latestCallerFrames() returns real JPEGs of the caller (null if no camera frame is fresh)
 import { randomBytes } from 'node:crypto';
 import type { Env } from '../config.js';
 import type { AudioSink, CallPort, VideoSink } from '../contracts/ports.js';
@@ -183,7 +183,7 @@ export function createCallPort(a: {
     audioSink: () => audio,
     videoSink: () => videoStable,
     onRemoteAudio: (cb) => session.onRemoteAudio(cb),
-    latestCallerFrames: async () => null,
+    latestCallerFrames: async (max) => (session.frames ? session.frames.grab(max) : null),
     roomHandle: () => session.room(),
   } as CallPort;
 }

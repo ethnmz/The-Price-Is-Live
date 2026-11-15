@@ -9,12 +9,15 @@
 // - That the remote track named `facetime-remote-audio` is the one we get subscribed to.
 // - That captureFrame backpressure keeps host speech in real time (no drift or gaps).
 // - That 960x540 RGBA frames at the stage frame rate are accepted without a backlog.
+// - That the caller camera arrives as a remote video track (`facetime-remote-video`) and
+//   VideoStream frames convert to RGBA; if not, latestCallerFrames stays null.
 // - That onDisconnected fires when the phone call ends.
 import {
   AudioFrame, AudioSource, AudioStream, LocalAudioTrack, LocalVideoTrack, Room, RoomEvent,
-  TrackKind, TrackPublishOptions, TrackSource, VideoBufferType, VideoFrame, VideoSource,
+  TrackKind, TrackPublishOptions, TrackSource, VideoBufferType, VideoFrame, VideoSource, VideoStream,
 } from '@livekit/rtc-node';
 import type { AudioSink, VideoSink } from '../contracts/ports.js';
+import { createFrameGrabber, type FrameGrabber } from './frames.js';
 import { resampleInt16, stereoToMono } from './resample.js';
 
 export interface LiveKitSession {
@@ -26,11 +29,15 @@ export interface LiveKitSession {
   onRemoteAudio(cb: (pcm16k: Int16Array) => void): void;
   onDisconnected(cb: (reason: string) => void): void;
   room(): unknown;
+  /** Newest caller camera frames (optional so test fakes can leave it out). */
+  frames?: FrameGrabber;
 }
 
 const OUT_RATE = 24000;
 const IN_RATE = 16000;
 const REMOTE_AUDIO_NAME = 'facetime-remote-audio';
+const REMOTE_VIDEO_NAME = 'facetime-remote-video';
+const MIN_FRAME_GAP_MS = 200; // at most 5 frames per second
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export function createLiveKitSession(): LiveKitSession {
@@ -47,6 +54,10 @@ export function createLiveKitSession(): LiveKitSession {
   const goneCbs: Array<(reason: string) => void> = [];
   let readingSid: string | null = null;
   let readCancel: (() => void) | null = null;
+  const frames = createFrameGrabber();
+  let videoReadSid: string | null = null;
+  let videoReadPreferred = false;
+  let videoCancel: (() => void) | null = null;
 
   function emitAudio(pcm: Int16Array): void {
     for (const cb of remoteCbs) {
@@ -73,8 +84,41 @@ export function createLiveKitSession(): LiveKitSession {
     if (readingSid === sid) { readingSid = null; readCancel = null; }
   }
 
+  // Read one remote video track until it ends. Never throws.
+  async function readRemoteVideo(track: ConstructorParameters<typeof VideoStream>[0], sid: string, preferred: boolean): Promise<void> {
+    videoReadSid = sid;
+    videoReadPreferred = preferred;
+    frames.clear();
+    let lastAt = 0;
+    try {
+      const reader = new VideoStream(track).getReader();
+      videoCancel = () => { void reader.cancel().catch(() => {}); };
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value || videoReadSid !== sid) continue;
+        const t = Date.now();
+        if (t - lastAt < MIN_FRAME_GAP_MS) continue;
+        lastAt = t;
+        try {
+          const rgba = value.frame.convert(VideoBufferType.RGBA);
+          frames.push(rgba.data, rgba.width, rgba.height, t);
+        } catch { /* skip a frame we cannot convert */ }
+      }
+    } catch { /* track went away */ }
+    if (videoReadSid === sid) { videoReadSid = null; videoCancel = null; videoReadPreferred = false; frames.clear(); }
+  }
+
   function wireRoom(r: Room): void {
     r.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
+      if (track.kind === TrackKind.KIND_VIDEO) {
+        const pref = pub.name === REMOTE_VIDEO_NAME;
+        // Keep the first remote video track, unless the preferred one shows up later.
+        if (videoReadSid && (videoReadPreferred || !pref)) return;
+        if (videoReadSid && videoCancel) videoCancel();
+        void readRemoteVideo(track, pub.sid ?? participant.identity, pref);
+        return;
+      }
       if (track.kind !== TrackKind.KIND_AUDIO) return;
       const preferred = pub.name === REMOTE_AUDIO_NAME;
       // Keep the first remote audio track, unless the preferred one shows up later.
@@ -84,7 +128,10 @@ export function createLiveKitSession(): LiveKitSession {
     });
     r.on(RoomEvent.TrackUnsubscribed, (_track, pub) => {
       if (pub.sid && pub.sid === readingSid && readCancel) readCancel();
+      if (pub.sid && pub.sid === videoReadSid && videoCancel) videoCancel();
     });
+    // A muted camera sends no new frames, so drop the old one right away.
+    r.on(RoomEvent.TrackMuted, (pub) => { if (pub.sid && pub.sid === videoReadSid) frames.clear(); });
     r.on(RoomEvent.ParticipantDisconnected, () => { /* reads end by themselves */ });
     r.on(RoomEvent.Disconnected, (reason) => {
       isConnected = false;
@@ -120,6 +167,9 @@ export function createLiveKitSession(): LiveKitSession {
     for (const p of r.remoteParticipants.values()) {
       for (const pub of p.trackPublications.values()) {
         if (pub.track && pub.kind === TrackKind.KIND_AUDIO && !readingSid) void readRemote(pub.track, pub.sid ?? p.identity);
+        if (pub.track && pub.kind === TrackKind.KIND_VIDEO && !videoReadSid) {
+          void readRemoteVideo(pub.track, pub.sid ?? p.identity, pub.name === REMOTE_VIDEO_NAME);
+        }
       }
     }
   }
@@ -153,6 +203,8 @@ export function createLiveKitSession(): LiveKitSession {
       isConnected = false;
       room = null;
       if (readCancel) readCancel();
+      if (videoCancel) videoCancel();
+      frames.clear();
       try {
         if (r && wasConnected) {
           for (const t of [audioTrack, videoTrack]) {
@@ -189,5 +241,6 @@ export function createLiveKitSession(): LiveKitSession {
     onRemoteAudio(cb) { remoteCbs.push(cb); },
     onDisconnected(cb) { goneCbs.push(cb); },
     room: () => room,
+    frames,
   };
 }
