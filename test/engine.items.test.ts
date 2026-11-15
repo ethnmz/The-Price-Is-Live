@@ -76,10 +76,25 @@ describe('item camera and voice fallbacks', () => {
     expect(g.state.phase).toBe('show_item');
   });
 
-  it('uses the prop closet by 12 seconds even with no camera or voice response', () => {
+  it('uses the prop closet when the camera never responds', () => {
     const g = game();
     const entered = g.state.phaseEnteredAt;
     g.fire('itemwait');
+    expect(g.state.now - entered).toBe(6000);
+    expect(g.state.phase).toBe('show_item');
+    expect(g.state.currentItem?.request.origin).toBe('prop_closet');
+    expect([...g.timers.keys()].some(id => /^(item|price)/.test(id))).toBe(false);
+    const before = g.state;
+    g.send({ type: 'FRAME_ID_READY', itemId: 'r1', label: 'Late bottle', confidence: 1 });
+    expect(g.state).toBe(before);
+    expect(requests(g.effects)).toEqual([]);
+  });
+
+  it('uses the prop closet by 12 seconds when voice never responds', () => {
+    const g = game();
+    const entered = g.state.phaseEnteredAt;
+    g.send({ type: 'FRAME_ID_READY', itemId: 'r1', label: null, confidence: 0 });
+    g.settle();
     expect(g.state.phase).toBe('item_resolve');
     g.fire('itemmax');
     expect(g.state.now - entered).toBe(12000);
@@ -96,7 +111,8 @@ describe('item camera and voice fallbacks', () => {
 
   it('uses late owner text during voice listening and rejects stale camera results', () => {
     const g = game();
-    g.fire('itemwait');
+    g.send({ type: 'FRAME_ID_READY', itemId: 'r1', label: null, confidence: 0 });
+    g.settle();
     g.text('Texted bottle');
     expect(requests(g.effects).at(-1)).toMatchObject({ request: { origin: 'text', rawText: 'Texted bottle' } });
     const before = g.state;

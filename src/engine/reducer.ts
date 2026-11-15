@@ -211,7 +211,7 @@ function onTimer(c: Ctx, kind: TimerKind): void {
       say(c, 'lobby.giveup');
       return enterEnding(c);
     case 'itemwait':
-      if (s.phase === 'item_resolve') askForItem(c);
+      if (s.phase === 'item_resolve') propCloset(c);
       return;
     case 'price': case 'itemmax': case 'itemvoice':
       if (s.phase === 'item_resolve' && s.currentItem && !s.currentItem.price) propCloset(c);
