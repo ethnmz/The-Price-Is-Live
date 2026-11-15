@@ -34,7 +34,12 @@ export const reduce: Reduce = (state, event, deps) => {
     const c: Ctx = { s, fx: [], deps, at: event.at, cfg: effectiveConfig(s, deps.config), ignored: null };
     s.now = event.at;
     dispatch(c, event);
-    if (c.ignored) return { state, effects: [ignoredLog(state, event, c.ignored)] };
+    if (c.ignored) {
+      // Unparsed speech in a guess window is not a guess, but it proves the audio works. Keep that note on the
+      // same state object (two small counters only) so the event stays "ignored" and the state identity holds.
+      if (c.keepOnIgnore) Object.assign(state, { windowSpeechSeen: true, silentWindows: 0 });
+      return { state, effects: [ignoredLog(state, event, c.ignored)] };
+    }
     return { state: s, effects: c.fx };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -63,10 +68,13 @@ function dispatch(c: Ctx, ev: GameEvent): void {
       return dialFailed(c, ev.reason);
     case 'CALL_ENDED': return onCallEnded(c, ev.reason);
     case 'SPEECH_PARTIAL':
+      noteSpeech(c);
       if (!s.listenOpen || (s.phase !== 'guess_listen' && s.phase !== 'guess_confirm')) return ignore(c, 'not listening');
       s.liveTranscript = ev.text;
       return;
-    case 'SPEECH_FINAL': return onSpeechFinal(c, ev.text, ev.confidence);
+    case 'SPEECH_FINAL':
+      noteSpeech(c);
+      return onSpeechFinal(c, ev.text, ev.confidence);
     case 'SPEAK_DONE': {
       if (ev.speakId !== s.speakingId) return ignore(c, 'not the line playing');
       const next = speechFinished(c);
@@ -83,7 +91,66 @@ function dispatch(c: Ctx, ev: GameEvent): void {
     case 'PRICE_READY': return onPrice(c, ev.itemId, ev.result);
     case 'PRICE_FAILED': return onPrice(c, ev.itemId, null);
     case 'FRAME_ID_READY': return ignore(c, 'camera ID is a later task'); // SEAM(camera)
-    case 'TICK': return; // SEAM(hard-clock): elapsed = ev.at - callStartAt; lightning and the cap go here.
+    case 'TICK': return onTick(c);
+  }
+}
+
+// ======================================================================
+// Hard clock (SPEC 7.4)
+// ======================================================================
+
+const LIGHTNING_REVEAL_HOLD_MS = 2000;
+const CLOCK_PHASES: GameState['phase'][] = [
+  'connected', 'lobby', 'rules', 'round_start', 'item_resolve', 'show_item', 'guess_prompt', 'guess_listen',
+  'guess_confirm', 'guess_silent', 'reveal', 'round_score',
+];
+
+function elapsedMs(c: Ctx): number {
+  return c.s.callStartAt === null ? 0 : c.at - c.s.callStartAt;
+}
+
+/** Demo and lightning games use the short timings. */
+function fastTimings(s: GameState): boolean {
+  return s.demo || s.lightning;
+}
+
+function onTick(c: Ctx): void {
+  const s = c.s;
+  if (s.callStartAt === null || !CLOCK_PHASES.includes(s.phase)) return;
+  if (elapsedMs(c) < c.cfg.hardCapMs) return;
+  // Out of time: drop the round in progress (it is never scored) and go to the finale.
+  s.capHit = true;
+  cancelTimers(c);
+  dropQueuedSpeech(s);
+  listen(c, false);
+  s.guesses = [];
+  s.pendingGuess = null;
+  s.liveTranscript = null;
+  s.timer = null;
+  if (s.history.length === 0) return enterEnding(c); // nothing to show yet
+  enterFinale(c);
+}
+
+/** Any speech while the mic is open in a guess window proves the audio works, even if it is not a guess. */
+function noteSpeech(c: Ctx): void {
+  const s = c.s;
+  if (!s.listenOpen || (s.phase !== 'guess_listen' && s.phase !== 'guess_confirm')) return;
+  s.windowSpeechSeen = true;
+  s.silentWindows = 0;
+  c.keepOnIgnore = true; // an unparsed "hmm" is ignored as a guess but still counts as audio
+}
+
+/** Switch lightning on (for good) when the game would not finish before the cap. */
+function checkLightning(c: Ctx): void {
+  const s = c.s;
+  if (s.lightning) return;
+  const d = s.roundDurationsMs;
+  const avg = d.length ? d.reduce((a, b) => a + b, 0) / d.length : c.cfg.avgRoundMsInitial;
+  const roundsLeft = s.totalRounds - s.roundIndex; // includes the round starting now
+  const projected = elapsedMs(c) + roundsLeft * avg + c.cfg.finaleBufferMs;
+  if (projected > c.cfg.hardCapMs) {
+    s.lightning = true;
+    log(c, 'info', 'lightning mode on', { projected });
   }
 }
 
@@ -331,14 +398,21 @@ function promptOwner(c: Ctx, id: PlayerId | undefined, when: 'first' | 'next'): 
   sendText(c, p.phone, 'itemprompt', MSG.itemPrompt(p.name, when));
 }
 
-/** SEAM(hard-clock, lightning): decide here whether a new round may start, and set s.lightning. */
+/** Is there another round, and is there still time to start it? */
 function beforeNextRound(c: Ctx): boolean {
-  return c.s.roundIndex + 1 < c.s.totalRounds;
+  const s = c.s;
+  if (s.roundIndex + 1 >= s.totalRounds) return false;
+  if (elapsedMs(c) >= c.cfg.lastRoundStartMs) {
+    s.capHit = true; // rounds were skipped
+    return false;
+  }
+  return true;
 }
 
 function startRound(c: Ctx): void {
   const s = c.s;
   s.roundIndex += 1;
+  checkLightning(c);
   const ownerId = s.turnOrder[s.roundIndex];
   const owner = playerById(s, ownerId) as Player;
   const at = s.turnOrder.indexOf(ownerId);
@@ -431,7 +505,6 @@ function showItem(c: Ctx): void {
 // ======================================================================
 
 function guessMs(c: Ctx): number {
-  // SEAM(text-mode): textMode is switched on by the later "auto TEXT MODE" task.
   return (c.s.textMode ? c.cfg.textModeGuessSeconds : c.cfg.guessSeconds) * 1000;
 }
 
@@ -453,9 +526,10 @@ function startGuess(c: Ctx, index: number): void {
   s.timer = null;
   s.nudged = false;
   s.guessCorrected = false;
+  s.windowSpeechSeen = false;
   setPhase(c, 'guess_prompt');
   listen(c, false); // the host voice must not be mistaken for a guess
-  if (index === 0) say(c, 'guess.quiet');
+  if (index === 0 && (s.roundIndex === 0 || !s.lightning)) say(c, 'guess.quiet');
   say(c, 'guess.prompt', { name: nameOf(s, s.guessOrder[index]) });
   s.afterSpeech = 'guess_listen';
 }
@@ -492,6 +566,11 @@ function listenSpeech(c: Ctx, text: string, confidence: number): void {
     s.pendingGuess = {
       cents: parsed.cents, spokenForm: parsed.spokenForm ?? c.deps.spokenAmount(parsed.cents), rawTranscript: text, corrections: 0,
     };
+    // Lightning: when the parser is sure, skip the confirm-back and lock at once.
+    if (s.lightning && !parsed.ambiguous && parsed.confidence >= c.cfg.lightningConfidence) {
+      setPhase(c, 'guess_confirm'); // same phase a confirmed guess locks from, so the flow moves on
+      return lockVoice(c);
+    }
     return enterConfirm(c);
   }
   if (parsed.kind !== 'pass') return ignore(c, 'not a guess');
@@ -587,11 +666,14 @@ function textGuess(c: Ctx, player: Player, text: string): void {
 /** Timer ran out, or a second "pass": 0 points. */
 function recordSilent(c: Ctx): void {
   const s = c.s;
-  // SEAM(text-mode): count s.silentWindows here when the guesser said nothing at all.
+  if (!s.windowSpeechSeen) s.silentWindows += 1;
+  const turnOnTextMode = !s.textMode && s.silentWindows >= 2;
+  if (turnOnTextMode) s.textMode = true;
   storeGuess(c, { playerId: s.guessOrder[s.guessIndex], status: 'silent', cents: null, rawTranscript: null, channel: null, corrected: false });
   setPhase(c, 'guess_silent');
   c.fx.push({ type: 'SFX', name: 'buzzer' });
   say(c, 'guess.silent', { name: nameOf(s, s.guessOrder[s.guessIndex]) });
+  if (turnOnTextMode) say(c, 'guess.textmode');
   s.afterSpeech = 'after_guess';
 }
 
@@ -612,7 +694,7 @@ function startReveal(c: Ctx): void {
   s.revealStage = 'drumroll';
   c.fx.push({ type: 'SFX', name: 'drumroll' });
   say(c, 'reveal.drumroll');
-  startTimer(c, 'drumroll', c.cfg.drumrollMs); // SEAM(lightning): lightningDrumrollMs
+  startTimer(c, 'drumroll', fastTimings(s) ? c.cfg.lightningDrumrollMs : c.cfg.drumrollMs);
 }
 
 function revealPrice(c: Ctx): void {
@@ -622,7 +704,8 @@ function revealPrice(c: Ctx): void {
   s.revealStage = 'price';
   say(c, 'reveal.price', { price: c.deps.spokenAmount(price.priceCents) });
   if (price.isEstimate) say(c, 'reveal.estimate');
-  startTimer(c, 'revealhold', c.cfg.revealHoldMs);
+  const hold = fastTimings(s) ? Math.min(c.cfg.revealHoldMs, LIGHTNING_REVEAL_HOLD_MS) : c.cfg.revealHoldMs;
+  startTimer(c, 'revealhold', hold);
 }
 
 function joinNames(names: string[], word: string): string {
@@ -678,7 +761,8 @@ function enterFinale(c: Ctx): void {
   setPhase(c, 'finale');
   s.finishedRoster = true;
   s.revealStage = 'none';
-  const card = buildResultsCard(s.history, s.players);
+  const cap = s.capHit ? { roundsDone: s.history.length, totalRounds: s.totalRounds } : undefined;
+  const card = buildResultsCard(s.history, s.players, { cap });
   sendToAll(c, 'card', card); // right away, so it arrives while they watch
   persistFinale(c, card);
   c.fx.push({ type: 'SFX', name: 'tada' });
@@ -744,7 +828,7 @@ function resetForNextGame(c: Ctx): void {
     gameId: null, callId: null, callStartAt: null, demo: c.deps.config.demo, lightning: false, textMode: false,
     turnOrder: [], roundIndex: -1, totalRounds: 0, currentItem: null, guessOrder: [], guessIndex: 0, guesses: [],
     pendingGuess: null, liveTranscript: null, timer: null, caption: null, revealStage: 'none', history: [],
-    pendingItemTexts: {}, itemPromptSentTo: [], silentWindows: 0, roundStartedAt: null, roundDurationsMs: [],
+    pendingItemTexts: {}, itemPromptSentTo: [], silentWindows: 0, windowSpeechSeen: false, roundStartedAt: null, roundDurationsMs: [],
     capHit: false, rematchRequested: false, speakQueue: [], speakingId: null, afterSpeech: null, timers: {},
     listenOpen: false, dialAttempts: 0, nudged: false, guessCorrected: false, listenLeftMs: 0, earlyPrices: {}, earlyFailed: {},
   });

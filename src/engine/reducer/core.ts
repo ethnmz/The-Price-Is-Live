@@ -38,6 +38,7 @@ export interface EnginePrivate {
   earlyPrices: Record<string, PriceResult>;
   earlyFailed: Record<string, true>;
   finishedRoster: boolean; // a game was played with this roster, so "rematch" works
+  windowSpeechSeen: boolean; // any speech arrived in the current guess window (for auto TEXT MODE)
 }
 
 export type EngineState = GameState & EnginePrivate;
@@ -46,7 +47,7 @@ export function freshPrivate(): EnginePrivate {
   return {
     bootAt: 0, speakQueue: [], speakingId: null, afterSpeech: null, speakSeq: 0, timerSeq: 0, textSeq: 0,
     timers: {}, listenOpen: false, dialAttempts: 0, nudged: false, guessCorrected: false, listenLeftMs: 0,
-    earlyPrices: {}, earlyFailed: {}, finishedRoster: false,
+    earlyPrices: {}, earlyFailed: {}, finishedRoster: false, windowSpeechSeen: false,
   };
 }
 
@@ -75,6 +76,8 @@ export interface Ctx {
   cfg: GameConfig;
   /** Set when the event does not fit: reduce() then returns the old state plus a LOG. */
   ignored: string | null;
+  /** With `ignored`: speech was heard in a guess window, so note it on the returned state (see reduce). */
+  keepOnIgnore?: boolean;
 }
 
 /** Config with the demo overrides applied when a `demo` text turned demo on after boot. */
