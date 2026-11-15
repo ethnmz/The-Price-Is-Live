@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Effect, GameEvent } from '../src/contracts/events';
+import { withPrivate } from '../src/engine/reducer/core';
 import { initialState, reduce } from '../src/engine/reducer';
 import { fakePriceResult, makeFakeDeps } from '../src/testing/fakes';
 import { MSG } from '../src/engine/messages';
@@ -76,18 +77,23 @@ describe('item camera and voice fallbacks', () => {
     expect(g.state.phase).toBe('show_item');
   });
 
-  it('uses the prop closet when the camera never responds', () => {
+  it('offers voice after camera silence and keeps the original 12-second deadline', () => {
     const g = game();
     const entered = g.state.phaseEnteredAt;
     g.fire('itemwait');
     expect(g.state.now - entered).toBe(6000);
-    expect(g.state.phase).toBe('show_item');
-    expect(g.state.currentItem?.request.origin).toBe('prop_closet');
-    expect([...g.timers.keys()].some(id => /^(item|price)/.test(id))).toBe(false);
+    expect(g.state.phase).toBe('item_resolve');
+    expect(g.effects).toContainEqual(expect.objectContaining({ type: 'SPEAK', key: 'item.ask' }));
+    expect(g.effects.at(-1)).toEqual({ type: 'LISTEN', on: true });
     const before = g.state;
     g.send({ type: 'FRAME_ID_READY', itemId: 'r1', label: 'Late bottle', confidence: 1 });
     expect(g.state).toBe(before);
     expect(requests(g.effects)).toEqual([]);
+    g.fire('itemmax');
+    expect(g.state.now - entered).toBe(12000);
+    expect(g.state.phase).toBe('show_item');
+    expect(g.state.currentItem?.request.origin).toBe('prop_closet');
+    expect([...g.timers.keys()].some(id => /^(item|price)/.test(id))).toBe(false);
   });
 
   it('uses the prop closet by 12 seconds when voice never responds', () => {
@@ -100,6 +106,32 @@ describe('item camera and voice fallbacks', () => {
     expect(g.state.now - entered).toBe(12000);
     expect(g.state.phase).toBe('show_item');
     expect(g.state.currentItem?.request.origin).toBe('prop_closet');
+  });
+
+  it.each([12000, 12001])('handles CALL_ENDED at item deadline +%s ms', elapsed => {
+    const g = game();
+    g.send({ type: 'CALL_ENDED', reason: 'disconnected' }, g.state.phaseEnteredAt + elapsed);
+    expect(g.state.phase).toBe('wait_call');
+    expect(g.state.callId).toBeNull();
+    expect(g.state.currentItem).toBeNull();
+    expect(withPrivate(g.state).speakingId).toBeNull();
+    expect(g.timers.size).toBe(0);
+  });
+
+  it.each([12000, 12001])('finishes active speech at item deadline +%s ms and drains fallback lines', elapsed => {
+    const g = game();
+    g.send({ type: 'FRAME_ID_READY', itemId: 'r1', label: null, confidence: 0 });
+    const speakId = withPrivate(g.state).speakingId;
+    expect(speakId).not.toBeNull();
+    const effects = g.send({ type: 'SPEAK_DONE', speakId: speakId! }, g.state.phaseEnteredAt + elapsed);
+    expect(g.state.phase).toBe('show_item');
+    expect(g.state.currentItem?.request.origin).toBe('prop_closet');
+    expect(effects).toContainEqual(expect.objectContaining({ type: 'SPEAK', key: 'item.propcloset' }));
+    expect(withPrivate(g.state).speakingId).not.toBe(speakId);
+    g.settle();
+    expect(withPrivate(g.state).speakingId).toBeNull();
+    expect(withPrivate(g.state).speakQueue).toEqual([]);
+    expect(g.effects).toContainEqual(expect.objectContaining({ type: 'SPEAK', key: 'item.holdup' }));
   });
 
   it('keeps the original deadline when a camera label is still pricing', () => {

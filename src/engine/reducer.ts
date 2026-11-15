@@ -54,10 +54,14 @@ function ignoredLog(state: GameState, event: GameEvent, why: string): Effect {
 function dispatch(c: Ctx, ev: GameEvent): void {
   const s = c.s;
   if (s.phase === 'boot' && ev.type !== 'BOOT') return ignore(c, 'not booted');
+  // A disconnected call takes precedence over resolving an unfinished item.
+  if (ev.type === 'CALL_ENDED') return onCallEnded(c, ev.reason);
   if (s.phase === 'item_resolve' && c.at - s.phaseEnteredAt >= c.cfg.itemResolveMaxMs) {
     propCloset(c);
     if (ev.type === 'TEXT_RECEIVED') onText(c, ev.phone, ev.text);
-    return;
+    // Completing the active line must still pump the fallback speech queue.
+    // Ticks must still enforce the game's hard clock.
+    if (ev.type !== 'TICK' && !(ev.type === 'SPEAK_DONE' && ev.speakId === s.speakingId)) return;
   }
   switch (ev.type) {
     case 'BOOT':
@@ -71,7 +75,6 @@ function dispatch(c: Ctx, ev: GameEvent): void {
     case 'CALL_FAILED':
       if (s.phase !== 'dialing') return ignore(c, 'not dialing');
       return dialFailed(c, ev.reason);
-    case 'CALL_ENDED': return onCallEnded(c, ev.reason);
     case 'SPEECH_PARTIAL':
       noteSpeech(c);
       if (!s.listenOpen || (s.phase !== 'guess_listen' && s.phase !== 'guess_confirm')) return ignore(c, 'not listening');
@@ -211,7 +214,7 @@ function onTimer(c: Ctx, kind: TimerKind): void {
       say(c, 'lobby.giveup');
       return enterEnding(c);
     case 'itemwait':
-      if (s.phase === 'item_resolve') propCloset(c);
+      if (s.phase === 'item_resolve') askForItem(c);
       return;
     case 'price': case 'itemmax': case 'itemvoice':
       if (s.phase === 'item_resolve' && s.currentItem && !s.currentItem.price) propCloset(c);
