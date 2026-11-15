@@ -34,6 +34,11 @@ export interface ChertConfig {
   lineId: string;
   facetimeBase: string;
   appBase: string;
+  /**
+   * Players' full numbers (E.164). The shared-line message API hides senders as "•••0101", so an
+   * inbound text is matched to the one roster number ending in those digits. From PLAYER_PHONES.
+   */
+  roster?: string[];
   fetch?: typeof fetch;
 }
 
@@ -58,6 +63,17 @@ const callBody = z.object({
   data: z.object({ status: str.optional(), end_reason: z.string().nullish() }).passthrough(),
 });
 const eventsBody = z.object({ data: z.array(z.unknown()) });
+/** GET /shared-messages answers { data: { items: [...] } }; older shapes used { data: [...] }. */
+const messagesBody = z.object({ data: z.union([z.array(z.unknown()), z.object({ items: z.array(z.unknown()) })]) });
+
+/** The roster number whose last digits match a masked handle like "•••0101" (only if exactly one does). */
+export function matchMasked(masked: unknown, roster: string[]): string | null {
+  if (typeof masked !== 'string') return null;
+  const tail = masked.replace(/\D/g, '');
+  if (tail.length < 2) return null;
+  const hits = roster.filter((p) => p.replace(/\D/g, '').endsWith(tail));
+  return hits.length === 1 ? hits[0] : null;
+}
 
 function trimBase(b: string): string {
   return b.replace(/\/+$/, '');
@@ -79,7 +95,7 @@ function pick(o: Record<string, unknown>, keys: string[]): unknown {
   return undefined;
 }
 
-function normalizeMessage(raw: unknown): { id: string; phone: string; text: string; at: number; inbound: boolean } | null {
+function normalizeMessage(raw: unknown, roster: string[] = []): { id: string; phone: string; text: string; at: number; inbound: boolean } | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
   const id = pick(o, ['id', 'message_id']);
@@ -94,7 +110,8 @@ function normalizeMessage(raw: unknown): { id: string; phone: string; text: stri
   else inbound = pick(o, ['recipient']) === undefined;
 
   const who = pick(o, inbound ? ['sender', 'from', 'handle'] : ['recipient', 'to', 'sender', 'from', 'handle']);
-  const phone = typeof who === 'string' ? toE164(who) : null;
+  let phone = typeof who === 'string' ? toE164(who) : null;
+  if (!phone) phone = matchMasked(pick(o, ['masked_sender', 'masked_handle', 'masked_recipient']), roster);
   if (!phone && inbound) return null; // cannot tell who spoke
   return {
     id: String(id),
@@ -225,11 +242,12 @@ export function createChertClient(cfg: ChertConfig): ChertClient {
 
     async listMessages() {
       const json = await appRequest('GET', '/shared-messages');
-      const p = eventsBody.safeParse(json);
+      const p = messagesBody.safeParse(json);
       if (!p.success) return [];
+      const list = Array.isArray(p.data.data) ? p.data.data : p.data.data.items;
       const out = [];
-      for (const raw of p.data.data) {
-        const m = normalizeMessage(raw);
+      for (const raw of list) {
+        const m = normalizeMessage(raw, cfg.roster ?? []);
         if (m) out.push(m);
       }
       return out;

@@ -1,6 +1,7 @@
 // Game constants (docs/SPEC.md 7.1) and environment loading. FROZEN contract file.
 // Tests must never need real env vars: every value has a safe default.
 import type { GameConfig } from './contracts/types';
+import { toE164 } from './contracts/money';
 
 export const STAGE_DEFAULTS = { width: 960, height: 540, fps: 15 };
 
@@ -51,6 +52,8 @@ export interface Env {
   chertLineId: string;
   chertFacetimeBase: string;
   chertAppBase: string;
+  /** Players' full numbers (E.164), to recognize senders the shared line masks. */
+  playerPhones: string[];
   lineDisplayNumber: string | null;
   callMode: 'inbound' | 'outbound_group' | 'link';
   elevenLabsApiKey: string;
@@ -101,6 +104,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env, opts: { readDot
     chertLineId: s.CHERT_LINE_ID ?? '',
     chertFacetimeBase: s.CHERT_FACETIME_BASE || 'https://facetime.trychert.com/api/v1',
     chertAppBase: s.CHERT_APP_BASE || 'https://app.trychert.com/api/v1',
+    playerPhones: (s.PLAYER_PHONES ?? '').split(',').map((p) => toE164(p.trim())).filter((p): p is string => !!p),
     lineDisplayNumber: s.LINE_DISPLAY_NUMBER || null,
     callMode: (s.CALL_MODE as Env['callMode']) || 'outbound_group',
     elevenLabsApiKey: s.ELEVENLABS_API_KEY ?? '',
