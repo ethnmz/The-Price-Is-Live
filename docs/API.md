@@ -172,7 +172,8 @@ export function estimatePrice(gemini: GeminiClient, cleanText: string, examples:
 // src/ai/webSearch.ts
 export function createGeminiSearch(gemini: GeminiClient): SearchProvider;
 // src/ai/pricing.ts
-export function createPricing(a: { items: ReferenceItem[]; gemini: GeminiClient; search?: SearchProvider | null; store?: StorePort | null; timeoutMs?: number; webTimeoutMs?: number }): PricingPort;
+export function createPricing(a: { items: ReferenceItem[]; gemini: GeminiClient; search?: SearchProvider | null; store?: StorePort | null; timeoutMs?: number; webTimeoutMs?: number; identify?: PricingPort['identifyFromFrames'] }): PricingPort;
+//   `identify` is the optional camera-identification callback behind PricingPort.identifyFromFrames(jpegs). When omitted, or if it throws, identifyFromFrames resolves null. (There is no separate createIdentifier factory.)
 // src/ai/variants.ts   (§10.4, for the accuracy harness)
 export interface VariantResult { priceCents: number | null; displayName: string; source: 'list' | 'web' | 'estimate' | 'none'; latencyMs: number }
 export type VariantFn = (rawText: string) => Promise<VariantResult>;
