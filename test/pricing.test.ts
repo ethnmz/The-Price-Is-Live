@@ -141,6 +141,13 @@ describe('pricing pipeline', () => {
     expect(result.isEstimate).toBe(result.source === 'estimate' || result.confidence < 0.5);
   });
 
+  it('gives web prices with one source or disagreeing prices 0.75 confidence', async () => {
+    const one: SearchProvider = { search: async () => ({ priceCents: 4200,
+      sources: [{ title: 'Only retailer', url: 'https://example.com/item' }], text: '$42.00' }) };
+    expect(await createPricing({ items, gemini: gemini(), search: one }).price(req()))
+      .toMatchObject({ source: 'web', confidence: 0.75, isEstimate: false });
+  });
+
   it('uses a persistent cache and tolerates throwing providers', async () => {
     const cached = await createPricing({ items, gemini: gemini() }).price(req('owala'));
     expect(await createPricing({ items, gemini: gemini(), store: { getCachedPrice: async () => cached } as unknown as StorePort })
