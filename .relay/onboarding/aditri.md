@@ -26,6 +26,22 @@ You are setting up this computer so **Aditri** can take part in the team's **Rel
 
 Aditri's role: **backend, game-state-and-scoring, deployment, reference-list-and-test-set-an, engine, src, contracts, src, config-ts, src, store, data, eval**. The team lead is **Ethan Meza**. The project repo is **https://github.com/ethnmz/The-Price-Is-Live**.
 
+Tasks in this role (their agent builds these during the run):
+- T01: Game engine reducer: full game flow
+- T02: Harden join registry and iMessage templates
+- T03: buildStageState: GameState to StageState
+- T04: Game runner: execute effects against the ports
+- T05: Reference price list (about 200 items) and data checker
+- T06: Held-out test set (40 items not on the list)
+- T07: MongoDB Atlas store (StorePort) that never blocks the game
+- T08: Engine: hard clock, lightning mode and automatic TEXT MODE
+- T09: sim-call: a whole game with fake ports and a virtual clock
+- T10: Accuracy harness: npm run eval (variants A, B, C)
+- T11: npm run doctor and the human runbook
+- T39: Engine: camera and voice fallbacks when no item text arrives
+- T41: Atlas seed script and show-off aggregations
+- T43: Dockerfile for the backup deployment
+
 ### Step 1: Check the basic tools
 Run each command and check the result:
 - `node --version` must be **v20 or newer**. If missing or older: brew install node   (or the installer from nodejs.org if Homebrew is missing)

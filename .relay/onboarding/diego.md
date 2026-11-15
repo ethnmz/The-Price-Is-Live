@@ -26,6 +26,20 @@ You are setting up this computer so **Diego** can take part in the team's **Rela
 
 Diego's role: **chert-bridge, voice-speech-to-text, text-to-speech, calls, imessage-src, comms, src, speech, src, agent-ts**. The team lead is **Ethan Meza**. The project repo is **https://github.com/ethnmz/The-Price-Is-Live**.
 
+Tasks in this role (their agent builds these during the run):
+- T12: Spoken guess parser: parseGuess, yes/no, spokenAmount
+- T13: Chert HTTP client and LiveKit bridge token
+- T14: iMessage MessagePort: poll and send
+- T15: Audio mixer and synthesized sound effects
+- T16: ElevenLabs TTS client with disk cache and character budget
+- T17: Speech-to-text provider: ElevenLabs Scribe realtime
+- T18: LiveKit adapter: one room, one audio track, one video track
+- T19: VoicePort: host voice, SFX, mouth level and the STT gate
+- T20: CallPort: Plan B outbound group call
+- T21: agent.ts: wire the real ports to the engine
+- T40: Caller camera frames from facetime-remote-video
+- T42: Smoke scripts for the real line (for humans)
+
 ### Step 1: Check the basic tools
 Run each command and check the result:
 - `node --version` must be **v20 or newer**. If missing or older: winget install OpenJS.NodeJS.LTS

@@ -1,1 +1,1292 @@
-tasks: []
+check: npm install --no-audit --no-fund --silent && npm run check
+gate:
+  command: npm install --no-audit --no-fund --silent && npm run check && npm run scan:secrets
+  every: 3
+contracts:
+- docs/API.md
+- docs/DATA_MODEL.md
+- src/contracts/types.ts
+- src/contracts/events.ts
+- src/contracts/ports.ts
+- src/contracts/hostLines.ts
+- src/contracts/money.ts
+- src/config.ts
+- src/testing/fakes.ts
+- src/stage/theme.ts
+- package.json
+tasks:
+- id: T01
+  title: 'Game engine reducer: full game flow'
+  lane: engine
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Build the pure game engine in src/engine/reducer.ts: `initialState(config)` and `reduce(state, event, deps)` (types in src/contracts/events.ts; rules in docs/API.md section 4 and the state table in §7.4). No I/O, no Date.now, no Math.random: time comes from `event.at`, everything else from `deps`. Never throw; an event that does not fit the phase returns the same state plus a LOG effect.
+    Already written for you (import them, do not rewrite): src/engine/scoring.ts (scoreRound, rankPlayers, champions), src/engine/registry.ts (parseJoinText, addPlayer), src/engine/messages.ts (MSG.*, buildResultsCard). Host text comes only from `deps.line(key, vars)`; emotion from `emotionFor(key)`. Every SPEAK also sets state.caption.
+    Flow to implement (this task = everything except the hard clock, lightning mode, auto TEXT MODE and the camera/voice item fallbacks, which are later tasks; leave clear seams):
+    - boot -> wait_call on BOOT.
+    - wait_call TEXT_RECEIVED: join text -> addPlayer, SEND_TEXT MSG.joinReply (or MSG.gameFull). `start` from the main player with 2+ players -> phase dialing, DIAL {phones}, MSG.calling to everyone, START_TIMER dialTimeoutMs; with under 2 players -> MSG.needTwo. `demo` from the main player turns demo on for the next game (state.demo; totalRounds = min(demoItems, players), short rules, lobby settle 1000 ms, hold-up 3000 ms). `rematch` from any player when a finished roster exists -> dial everyone again. Any other text from a registered player is their item: keep it in pendingItemTexts, emit PRICE_ITEM with itemId `r{seat+1}` and origin 'text', reply MSG.itemReceived. Text from a stranger -> MSG.unknown.
+    - dialing: CALL_READY -> connected. CALL_FAILED or the dial timer -> DIAL once more, then MSG.cantConnect and back to wait_call.
+    - connected: set callStartAt and gameId (deps.newGameId()), SPEAK connect.hello, then lobby.
+    - lobby: joins still work (SPEAK lobby.joined). Go to rules when there are 2+ players and no join for lobbySettleMs, or 4 players, or anyone says/texts "start" or "let's go". Under 2 players after lobbyMaxWaitMs -> SPEAK lobby.giveup -> ending.
+    - rules: turnOrder = seat order. SPEAK rules.full (rules.short in demo). Text MSG.itemPrompt(name,'first') to owner 1 unless their item already arrived. PERSIST 'game'. Then round_start.
+    - round_start: next owner; guessOrder = the other players in turn order starting after the owner (round 1: p2,p3,p4; round 2: p3,p4,p1). Text MSG.itemPrompt(next owner,'next') if not sent yet. SPEAK round.start {n: round number, owner}.
+    - item_resolve: price already here -> show_item. Item text sent but price pending -> SPEAK item.pricing and wait at most priceTimeoutMs. No item text -> wait itemWaitMs. On timeout, PRICE_FAILED or propClosetSuggested -> prop closet: SPEAK item.propcloset and use deps.propItem() as the priced item. The game never blocks here.
+    - show_item: SPEAK item.holdup, wait showItemMs, then the first guesser.
+    - guess_prompt: LISTEN off, SPEAK guess.quiet (first guesser of the round only) and guess.prompt {name}; then guess_listen.
+    - guess_listen: LISTEN on, START_TIMER guessSeconds (textModeGuessSeconds when state.textMode) and set state.timer. SPEECH_PARTIAL updates liveTranscript. SPEECH_FINAL goes through deps.parseGuess: amount -> pendingGuess + guess_confirm; pass -> SPEAK guess.nudge once, a second pass counts as silent; anything else is ignored. A text with a number from the CURRENT guesser's phone locks at once (channel 'text', SPEAK guess.textack, reply MSG.guessReceived); a text without a number from them -> MSG.badGuess. Timer end -> guess_silent.
+    - guess_confirm: LISTEN off, SPEAK guess.confirm {amount: spokenForm}, then LISTEN on and START_TIMER confirmSilenceMs. "yes" or the timer -> lock (SPEAK guess.locked). A new amount replaces it and is confirmed once more; a second correction is final. "no" alone -> back to guess_listen with the time that was left (at least minRelistenMs).
+    - guess_silent: record status 'silent', SFX buzzer, SPEAK guess.silent {name}.
+    - reveal (after the last guesser): LISTEN off, SPEAK reveal.drumroll, SFX drumroll, revealStage 'drumroll', wait drumrollMs; then SFX ding, revealStage 'price', SPEAK reveal.price {price: deps.spokenAmount(cents)} and reveal.estimate when isEstimate; hold revealHoldMs.
+    - round_score: scoreRound, update players' score and roundWins, push history, PERSIST 'round' and one 'guess' per guesser (shapes in docs/DATA_MODEL.md section 5). SPEAK score.winner / score.tie / score.allover / score.nowinner, then score.stump (score.stumplow under 20). Wait scoreHoldMs, then the next round or finale.
+    - finale: SEND_TEXT buildResultsCard to every player right away, PERSIST 'result', 'game' (with endedAt) and one 'player' each; SFX tada; SPEAK finale.drumroll, finale.champion (or finale.cochamps), finale.thanks.
+    - rematch_offer: SPEAK rematch.offer, LISTEN on for rematchListenMs. "rematch" / "again" / "yes" spoken, or a REMATCH text -> rematchRequested, MSG.rematchAck.
+    - ending: LISTEN off, SPEAK end.bye, END_CALL. On CALL_ENDED go to wait_call keeping the roster with scores reset; if rematchRequested, dial everyone again at once.
+    - CALL_ENDED before ending: if at least one round was scored, text MSG.callDropped(card) to everyone; cancel timers; wait_call.
+    Idempotency keys for SEND_TEXT: `${gameId}:${type}:${last4(phone)}:${n}`. Timer ids must be unique per use so late TIMER events are ignored. You may split helpers into src/engine/reducer/*.ts.
+    Tests in test/engine.reducer.test.ts drive the reducer with makeFakeDeps() from src/testing/fakes.ts (lines look like `guess.prompt|name=Diego`, amounts parse from digits) using a small loop that answers SPEAK with SPEAK_DONE and fires timers on demand. Cover: a 4-player game with hand-computed final totals; a 2-player game; demo mode (2 rounds, 4 players); everyone over; a tie; a silent guesser; a correction during confirm-back; a text guess; pricing timeout -> prop closet; dial failure then retry; CALL_ENDED mid-game sends the dropped-call text; stray and late events never throw; a rematch text after the game dials again.
+  lease:
+  - src/engine/reducer.ts
+  - src/engine/reducer/**
+  - test/engine.reducer.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/engine.reducer.test.ts
+  priority: must
+- id: T02
+  title: Harden join registry and iMessage templates
+  lane: game-state-and-scoring
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Working first versions of src/engine/registry.ts (parseJoinText, cleanName, addPlayer) and src/engine/messages.ts (MSG.*, buildResultsCard) already exist and other tasks import them, so keep every exported name and signature. Make them robust and prove them with tests.
+    - registry (§8.1, task Z3 in §15.4): at least 15 join strings parse correctly ("I'm in, I'm Diego", "im in", "Im in it's akshi", "in - Aditri", "I'm in! this is ETHAN", curly apostrophes, emoji, extra spaces, a name longer than 12 characters is cut at a word or at 12 characters). Texts that are not joins ("Owala bottle", "start", "25", "interesting", "in-ear headphones") must not parse as joins. Roster: max 4, first is main, same phone twice is a duplicate, same phone with a new name renames, a 5th phone gets outcome 'full'.
+    - messages (§11): every template matches the spec text character for character. buildResultsCard tests: 4, 3 and 2 players (lines for missing players are skipped), a tie for first (both get the gold medal, "tie for the win" line), an estimate tag, the hard-cap line, one blank line between blocks, under 4,000 characters.
+    Do not change test/contracts.test.ts or test/scoring.test.ts; they must keep passing.
+  lease:
+  - src/engine/registry.ts
+  - src/engine/messages.ts
+  - test/registry.test.ts
+  - test/messages.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/registry.test.ts test/messages.test.ts test/contracts.test.ts
+  priority: must
+- id: T03
+  title: 'buildStageState: GameState to StageState'
+  lane: backend
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/engine/stageState.ts: `buildStageState(state: GameState, now: number, config: GameConfig): StageState` (types in src/contracts/types.ts; what each phase shows is the "Stage shows" column of §7.4 and §13.2). Pure function. It reads only the documented GameState fields, so you can build it before the reducer exists: make GameState objects by hand in the test.
+    Mapping rules:
+    - title 'THE PRICE IS LIVE'; roundLabel `ROUND {k} OF {n}` from round_start to round_score, else null.
+    - podiums: one per player with name, score, seat. role: 'owner' for the current owner, 'guesser' for the current guesser in guess_*, 'winner' for round winners in round_score and for champions in finale, else 'idle'.
+    - guessText / guessState per guesser from state.guesses and state.pendingGuess: pending "$25.00 ?", locked "$25.00 ✓", silent or pass "—". In round_score, a locked guess above the price becomes guessState 'over' with plain "$40.00". Use formatCents.
+    - delta (round_score only) from the last RoundResult in history: { guess: guessPoints, bonus: 25 for winners else 0, stump: stumpPoints for the owner else 0 }.
+    - timer from state.timer: secondsLeft = (startedAt + ms - now) / 1000 clamped at 0, total in seconds, running = phase is guess_listen. Shown in guess_prompt (full, not running), guess_listen and guess_confirm.
+    - reveal: null outside reveal and round_score. stage from state.revealStage. priceText and itemName are EMPTY strings until the stage is 'price'. sourceLabel: 'Price list' for source list, 'Google Search: {host of the first web evidence url}' for web, 'Estimate' for estimate.
+    - mysteryOwner: the owner's name from round_start through the guess phases. liveTranscript in guess_listen only.
+    - caption from state.caption; when it is null in guess_listen use { text: 'Listening...', speaker: 'system' }, in item_resolve 'Checking the price tag...'.
+    - joinHint `Text {lineDisplayNumber}: I'm in, I'm {name}` (without the number when it is null) in wait_call, dialing, connected and lobby while under 2 players. banner: 'TEXT REMATCH TO PLAY AGAIN' in rematch_offer, 'THANKS FOR PLAYING' in ending, 'CLOSEST WITHOUT GOING OVER WINS' in rules.
+    - fallbackBadge 'TEXT MODE' when state.textMode. lightning from state. hostSpeaking false (the runner overrides it). capRemainingMs = hardCapMs - (now - callStartAt) only when that is 45,000 or less and a call is on, else null.
+    - finale (finale, rematch_offer, ending): ranks from rankPlayers, champion from champions, items like "Ethan: Owala FreeSip water bottle $34.99" (add " (estimate)" for estimates).
+    The secrecy rule is the most important test: for every phase before the reveal price stage, JSON.stringify(stageState) must not contain the item's displayName, raw text or price text. Also test each phase once (compare with fixtures/stage-states.ts for the expected shape), the timer math, 2/3/4 players and the cap clock.
+  lease:
+  - src/engine/stageState.ts
+  - test/stageState.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/stageState.test.ts
+  priority: must
+- id: T04
+  title: 'Game runner: execute effects against the ports'
+  lane: engine
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/engine/runner.ts exactly as described in docs/API.md section 4 ("Effects out, and what the runner does with each" and the signatures `Scheduler`, `VirtualScheduler`, `RunnerOpts`, `Runner`, `createRunner`). The runner owns the state, calls `opts.reduce`, runs each effect against `opts.ports`, and feeds the answer events back. `reduce`, `initial` and `buildStageState` are passed in, so this task does not need the real reducer: test it with a tiny scripted reducer written inside the test and the fakes from src/testing/fakes.ts (makeFakePorts, makeFakeDeps).
+    Details:
+    - dispatch() is re-entrancy safe: events are queued and processed one at a time in order.
+    - SPEAK effects are spoken strictly one after another; SPEAK_DONE {speakId} is dispatched after each, even if voice.speak rejects.
+    - PRICE_ITEM runs in the background (do not block the queue) -> PRICE_READY, or PRICE_FAILED on rejection. IDENTIFY_FROM_CAMERA -> FRAME_ID_READY (label null, confidence 0 when frames or the result are null). DIAL -> on rejection dispatch CALL_FAILED {reason: error message}. SEND_TEXT errors are logged and swallowed. No effect handler may crash the runner.
+    - Timers go through the Scheduler (default: real setTimeout/Date.now). START_TIMER with an id that is already running replaces it. stop() clears every timer and the tick.
+    - start(): subscribes to voice.onSpeech (isFinal -> SPEECH_FINAL, else SPEECH_PARTIAL), message.onMessage -> TEXT_RECEIVED, call.on('ready') -> CALL_READY, call.on('ended') -> CALL_ENDED, voice.onMouthLevel -> stage.setMouthLevel, voice.onSpeakingChange; calls message.start(); dispatches BOOT; ticks every tickMs (default 1000) with TICK.
+    - After every processed event call stage.setState(buildStageState(state, now, deps.config)) with hostSpeaking set from the last onSpeakingChange value.
+    - VirtualScheduler: now() starts at 0; advance(ms) fires due timers in time order, moving now() to each timer's time, and awaits pending promises between timers so async port calls settle. This is what lets a 4-minute game run in milliseconds.
+    Tests (test/engine.runner.test.ts): each effect type reaches the right fake port; SPEAK order and SPEAK_DONE; timers fire and cancel under VirtualScheduler; a throwing port does not stop the runner; a pricing call that never resolves does not block other events; stage.setState is called after each event; stop() leaves no timers.
+  lease:
+  - src/engine/runner.ts
+  - test/engine.runner.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/engine.runner.test.ts
+  priority: must
+- id: T05
+  title: Reference price list (about 200 items) and data checker
+  lane: reference-list-and-test-set-an
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Create data/reference-items.json: about 200 (at least 180) common home and school items with US retail prices, in the ReferenceItem shape of docs/DATA_MODEL.md section 4 (see fixtures/reference-items.sample.json for 20 examples you may reuse). Rules from §10.2: new, regular US retail price, no sales or bundles; categories to cover: drinkware, school supplies, calculators, headphones, chargers, snacks and drinks, kitchen basics, small appliances, toiletries, cleaning, bedding/decor, small electronics, clothing basics, sports, toys/games, books. Each item: unique id `ref_0001`..., a specific name with brand and size, 2 to 4 lowercase aliases a player might text (aliases unique across the file), category, priceCents 100..100000, source (the manufacturer or retailer domain where that list price is published), checkedAt "2026-11-14".
+    HONESTY RULE (this feeds a number we will quote to judges): set "verified": true only if you actually fetched the source page in this session and read the price; otherwise "verified": false and use the regular list price you are confident of. Never invent a URL. data/README.md must say plainly how many items are verified and that the rest are list prices from the model's knowledge, to be spot-checked by a human.
+    Also write scripts/check-data.ts (`npm run check:data`): validates data/reference-items.json with zod (shape, id format, unique ids and aliases, price range, at least 180 items, at least 12 categories) and, if data/heldout-test.json exists, validates it too (shape per DATA_MODEL, 30 to 50 items, prices $3 to $400 with at least 5 above $100, tiers roughly balanced, and NO held-out item on the list: flag any held-out text whose word-token overlap (Dice) with a list name is above 0.7 or that equals an alias). Exit code 1 with a clear list of problems. Export the check functions so tests can call them. test/data.reference.test.ts runs the checks on the real file and on a deliberately broken in-memory copy.
+  lease:
+  - data/reference-items.json
+  - data/README.md
+  - scripts/check-data.ts
+  - test/data.reference.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run check:data
+  - npm install --no-audit --no-fund --silent && npx vitest run test/data.reference.test.ts
+  priority: must
+- id: T06
+  title: Held-out test set (40 items not on the list)
+  lane: data
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Create data/heldout-test.json: 40 HeldoutItems (docs/DATA_MODEL.md section 4, §17.3) that are NOT in data/reference-items.json. `text` is how a player would text it ("Stanley quencher 40oz", "jbl flip 6 speaker"). `trueCents` is the new, regular US retail price. Prices must span $3 to $400 with at least 5 items above $100. About half `tier: "similar"` (same kind of thing as a list item, different brand or model) and half `tier: "novel"` (nothing like it on the list); at least half in categories the list covers.
+    HONESTY RULE: this set decides the one number we quote to judges. "verified": true only if you fetched the source page in this session and read the price; else false with the regular list price you are confident of. Never invent a URL. Write data/HELDOUT.md: how the set was made, how many items are verified, the rule that it is frozen (written before any prompt tuning and never tuned against), and the honest limits from §17.3.
+    `npm run check:data` (scripts/check-data.ts from T05, do not edit it) must pass with your file present, including the no-overlap check. test/data.heldout.test.ts asserts the size, tier balance, price span and zero overlap by calling the exported check functions.
+  lease:
+  - data/heldout-test.json
+  - data/HELDOUT.md
+  - test/data.heldout.test.ts
+  depends_on:
+  - T05
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run check:data
+  - npm install --no-audit --no-fund --silent && npx vitest run test/data.heldout.test.ts
+  priority: must
+- id: T07
+  title: MongoDB Atlas store (StorePort) that never blocks the game
+  lane: store
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Build src/store/ (§21.4, docs/DATA_MODEL.md section 5): `createStore(env, opts?)` in src/store/index.ts returning StorePort plus ready(), flush(), close(). Suggested files: mongo.ts (connect with the `mongodb` driver, short serverSelectionTimeout, create indexes once), schemas.ts (zod schema per collection), persist.ts (queue), index.ts.
+    - persist(kind, doc) returns at once. Documents go into an in-memory queue written in the background with retry and backoff; the queue is capped (drop oldest, log once). Kind -> collection and upsert keys are in the DATA_MODEL table. For kind 'player' replace `phone` with phoneLast4 + salted SHA-256 phoneHash (salt env.phoneHashSalt) and $inc the lifetime counters. Validate with zod; an invalid document is logged and dropped. Strip any field that looks like a full phone number, a token or image data. Nothing here may ever throw into the game.
+    - loadReferenceItems(): Atlas `reference_items` first (2 s limit); if Atlas is not configured, down, or empty, read data/reference-items.json, and if that file does not exist yet, fixtures/reference-items.sample.json.
+    - getCachedPrice(cleanText): `price_cache` lookup with a 300 ms limit; null on miss, error or timeout. Also keep an in-process Map so a price persisted in this run is found without the database.
+    - vectorSearch(): return [] (the vector index is not part of this build).
+    - No MONGODB_URI: the store works in local-only mode (queue discarded, one warning).
+    `opts.client` lets tests inject a fake MongoClient-like object. Tests (test/store.test.ts): persist returns immediately while the fake client hangs forever; retry after a failed write; phone hashing (no full phone in what is written); upsert keys per kind; invalid doc dropped; loadReferenceItems falls back to JSON; getCachedPrice timeout returns null; no-URI mode. No real database in tests.
+  lease:
+  - src/store/**
+  - test/store.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/store.test.ts
+  priority: must
+- id: T08
+  title: 'Engine: hard clock, lightning mode and automatic TEXT MODE'
+  lane: game-state-and-scoring
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Extend the reducer from T01 (src/engine/reducer.ts and helpers) with the timing safety rules of §7.4 ("Hard clock") and §9.2 rule 8 / §9.6. Keep all T01 tests green.
+    - Hard clock, checked on every TICK from connected on: elapsed = at - callStartAt. At elapsed >= config.hardCapMs: abandon the round in progress (do not score it), set capHit, cancel timers, LISTEN off, go to finale with the scores so far; the finale then says finale.shortcap instead of finale.drumroll and the results card gets the cap line (buildResultsCard opts.cap = rounds finished of total).
+    - Do not start a new round when elapsed >= config.lastRoundStartMs: go to finale instead (capHit true if rounds were skipped).
+    - Lightning mode: at each round_start compute projected = elapsed + roundsLeft * avgRoundMs + finaleBufferMs, where avgRoundMs is the mean of roundDurationsMs (avgRoundMsInitial when empty). If projected > hardCapMs set lightning = true for the rest of the game: no guess.quiet after round 1, drumroll lightningDrumrollMs, reveal hold 2000 ms, and skip confirm-back when the parsed guess has confidence >= lightningConfidence and is not ambiguous (lock at once with guess.locked). Demo mode uses the lightning timings from the start.
+    - Automatic TEXT MODE: count guess windows in which no SPEECH_PARTIAL or SPEECH_FINAL arrived at all (silentWindows). After two in a row set textMode = true, SPEAK guess.textmode once, and use textModeGuessSeconds for later windows. Any speech resets the count. (Text guesses from the current guesser already work from T01.)
+    Tests in test/engine.clock.test.ts (use makeFakeDeps, with small config overrides where handy): slow play hits the cap at 4:30 and reaches finale with the cap line in the card and no half-scored round; no new round after 4:10; lightning switches on when the projection is over and the skipped confirm-back works; two silent windows turn on TEXT MODE and a text guess then locks; a normal fast game never turns lightning on.
+  lease:
+  - src/engine/reducer.ts
+  - src/engine/reducer/**
+  - test/engine.clock.test.ts
+  depends_on:
+  - T01
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/engine.clock.test.ts test/engine.reducer.test.ts
+  priority: must
+- id: T09
+  title: 'sim-call: a whole game with fake ports and a virtual clock'
+  lane: engine
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Wire the real reducer (T01), buildStageState (T03) and the runner (T04) to the fakes in src/testing/fakes.ts.
+    1. src/engine/simGame.ts: `playScriptedGame(opts)` that other scripts reuse. Options: players (name, phone), items per owner (text and price, fed through FakePricing's table), guesses per round per player (a number as spoken text, or 'silent', or { text: '25' } for a texted guess), demo flag, optional overrides for ports and deps (so the demo check can pass real host lines, the real parser and a real renderer later). It creates the runner with a VirtualScheduler, sends the join texts and `start`, emits call ready, answers each prompt when the state reaches guess_listen for that player, confirms with "yes", advances virtual time until the phase is back to wait_call (with a safety limit), and returns { finalState, ports, virtualMs, resultsCards, phasesSeen, stageStates }.
+    2. scripts/sim-call.ts (`npm run sim`, flag `--demo` for demo mode, `--players 2|3|4`): plays a game with the four fixture players, prints the phases, every host line, the final scoreboard and the results card, and exits 0. It must take under 10 real seconds and exit 1 if the game did not finish.
+    3. test/engine.sim.test.ts: the scripted games from task Z4 in §15.4 that already apply: 4-player normal game, 2-player game, demo mode with 2 items, a silent guesser, everyone over, a tie. Final totals must equal hand-computed values (the scoring examples in §6.5 are handy), the results card must reach all phones, and the virtual duration of the 4-player game must be under 4:30 and of the demo game under 2:00.
+    If the real reducer has a bug that blocks you, do not edit it: report a blocker with the failing output.
+  lease:
+  - src/engine/simGame.ts
+  - scripts/sim-call.ts
+  - test/engine.sim.test.ts
+  depends_on:
+  - T01
+  - T03
+  - T04
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run sim
+  - npm install --no-audit --no-fund --silent && npm run sim -- --demo
+  - npm install --no-audit --no-fund --silent && npx vitest run test/engine.sim.test.ts
+  priority: must
+- id: T10
+  title: 'Accuracy harness: npm run eval (variants A, B, C)'
+  lane: eval
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Build the measured-number harness of §17.3 in eval/.
+    - eval/metrics.ts (pure, fully tested): for a list of { trueCents, priceCents | null, latencyMs, tier }: within15 and within25 (count and percent; a null price counts as a miss), median absolute percent error, over-price rate, median and p95 latency, Wilson 95% interval for within15, and the same split by tier.
+    - eval/run-eval.ts (`npm run eval`): loads data/heldout-test.json and data/reference-items.json, builds the variants with `makeVariants` from src/ai/variants.ts and `createAi` from src/ai (A = Gemini alone, B = list + Gemini, C = B + Google Search grounding), runs every item through A, B and C with small concurrency and a per-item timeout, then writes eval/results.json and eval/report.md (date, model names, exact set size, headline table, per-tier table, per-item table, the worst misses, three plain sentences, the honest limits of §17.3, and how many held-out prices are "verified") and persists one 'evalRun' per variant through the store if MONGODB_URI is set.
+    - Flag `--mock`: uses a deterministic fake pricer, writes to out/eval-mock/ instead of eval/, and marks the output `"mock": true`. This is what the acceptance command runs.
+    - HONESTY RULES: never write an invented or mock number into eval/report.md or eval/results.json. If GEMINI_API_KEY is not set, `npm run eval` (without --mock) must exit 1 with a clear message and leave eval/ alone. If the key IS available in your environment, run the real eval once and commit eval/results.json and eval/report.md; otherwise commit an eval/report.md whose first line is "NOT RUN YET: needs GEMINI_API_KEY. Run `npm run eval`." and do not create eval/results.json. Never round up or drop bad items.
+    Tests (test/eval.metrics.test.ts): metrics on hand-made cases (including nulls, the exact boundary at 15%, the Wilson interval against a known value), and the --mock run producing a well-formed results object.
+  lease:
+  - eval/**
+  - test/eval.metrics.test.ts
+  depends_on:
+  - T06
+  - T27
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run eval -- --mock
+  - npm install --no-audit --no-fund --silent && npx vitest run test/eval.metrics.test.ts
+  priority: must
+- id: T11
+  title: npm run doctor and the human runbook
+  lane: deployment
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    The build is done by agents with no phone and possibly no keys, so the humans need one command and one page to bring the real thing up.
+    1. scripts/doctor.ts (`npm run doctor`): loads env with loadEnv(process.env, { readDotenv: true }) and prints a checklist with OK / MISSING / FAIL per line: every variable loadEnv knows (never print values, only "set" or "missing"); then, only for keys that are set and unless `--offline` is passed: LiveKit (mint a token), Chert (GET {appBase}/lines), ElevenLabs (GET https://api.elevenlabs.io/v1/user/subscription and print characters left), Gemini (a one-token generateContent), MongoDB (ping). Each network check has a 5 s timeout and can never crash the script. Exit 0 when nothing FAILED (missing keys are warnings), `--strict` exits 1 on any MISSING. Keep the check logic in exported functions that take an injected fetch so test/doctor.test.ts can cover: all missing, all set with a fake fetch, a failing service, and that no secret value is ever printed.
+    2. docs/runbook.md for the humans: accounts and keys to create (Chert line via https://app.trychert.com/skills.md, LiveKit project, ElevenLabs key + voice id, Gemini key from Google AI Studio, Atlas M0 cluster), how to fill the local env file from the example file, verify the four phones with Chert, `npm run doctor`, `npm start`, how to play (text "I'm in, I'm {name}", main player texts "start"; "demo" for the 2-minute game; "REMATCH"), what to do when audio is silent (TEXT MODE), where logs are, the 5-minute / 50-minute trial limits and docs/call-log.md, the full "TO VERIFY ON THE REAL LINE" list (collect the UNVERIFIED items of §0 and §3), and key rotation after submission. Plain words, numbered steps.
+  lease:
+  - scripts/doctor.ts
+  - docs/runbook.md
+  - test/doctor.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run doctor -- --offline
+  - npm install --no-audit --no-fund --silent && npx vitest run test/doctor.test.ts
+  priority: must
+- id: T12
+  title: 'Spoken guess parser: parseGuess, yes/no, spokenAmount'
+  lane: speech
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write the deterministic speech helpers (no AI calls), §9.3 to §9.5:
+    - src/speech/parseGuess.ts: `parseGuess(text, sttConfidence = 1): ParsedGuess` following the ten rules of §9.4 in order (filler removal, pass, self-correction, digits, number words, dollars and cents, two-number price talk, ranges, the $99,999 cap, confidence x0.8 when ambiguous). `spokenForm` is always set for amounts (use spokenAmount).
+    - src/speech/yesno.ts: `parseYesNo(text): 'yes' | 'no' | null` with the word lists under the §9.5 table; parseGuess returns kind 'yes'/'no' through it, and an utterance with both a yes word and an amount is an amount.
+    - src/speech/spokenAmount.ts: `spokenAmount(cents): string` for the host to repeat: 2500 -> "twenty-five dollars", 1299 -> "twelve dollars and ninety-nine cents", 100 -> "one dollar", 100000 -> "one thousand dollars", 15050 -> "one hundred fifty dollars and fifty cents".
+    test/parseGuess.test.ts must contain EVERY row of the §9.5 table exactly (cents, ambiguous flag, pass / yes / no / none) plus at least 20 more cases (digits with commas, "$1.2k", "5k", "a couple bucks", "twelve bucks fifty", "thirty bucks fifty cents", "twelve five" -> 500 ambiguous, empty string, emoji, "point five" -> none, case and punctuation noise). test/spokenAmount.test.ts covers the examples above and that parseGuess(spokenAmount(c)).cents === c for 50 sample amounts.
+  lease:
+  - src/speech/**
+  - test/parseGuess.test.ts
+  - test/spokenAmount.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/parseGuess.test.ts test/spokenAmount.test.ts
+  priority: must
+- id: T13
+  title: Chert HTTP client and LiveKit bridge token
+  lane: chert-bridge
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/comms/chert.ts and src/comms/token.ts with the signatures in docs/API.md section 5; HTTP shapes in section 6 and §3.4; sample bodies in fixtures/chert.ts. Plain `fetch` (injected through cfg.fetch for tests), no SDK.
+    - createChertClient: sets the auth headers on every request and an Idempotency-Key on every POST. createCall builds the outbound body (`recipients` for 2+ phones, `destination` + `destination_type: "phone"` for one; media audio+video; mode customer_managed; remote_participant_identity = agentIdentity) and returns data.id. getCall, getCallEvents, endCall (body {}), sendMessage (POST {appBase}/shared-messages), listMessages (GET {appBase}/shared-messages).
+    - Parse responses tolerantly with zod: the field names of polled messages and events are UNVERIFIED, so accept the spellings listed in fixtures/chert.ts, normalize the sender with toE164, and mark inbound vs outbound. A message you cannot understand is skipped, not fatal.
+    - Errors: non-2xx -> ChertError with code (from error.code when present), status and a short human sentence for line_busy, recipient_not_verified, facetime_group_unavailable, shared_contact_limit, 401/403 and unknown. On 404 for a calls endpoint retry once against the other base URL (§0 item 10). Network errors retry once with the SAME idempotency key. Never log the API key or full phone numbers.
+    - mintToken: `livekit-server-sdk` AccessToken with roomJoin, canPublish, canSubscribe for one room; ttl default 3600 s, max 7200 s (throw above that).
+    Tests (test/chert.test.ts) with a fake fetch: headers and idempotency key present; group vs single body; error mapping for each code; 404 fallback to the other base; retry keeps the key; listMessages normalizes the fixture and its alternative spellings; the token decodes (split the JWT and base64-decode the payload) with the right identity, room, grants and exp - nbf <= 7200. Use obviously fake key strings in tests (for example "test-key").
+  lease:
+  - src/comms/chert.ts
+  - src/comms/token.ts
+  - test/chert.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/chert.test.ts
+  priority: must
+- id: T14
+  title: 'iMessage MessagePort: poll and send'
+  lane: imessage-src
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/comms/imessage.ts: `createMessagePort({ chert, pollMs = 1500 })` implementing MessagePort (src/contracts/ports.ts) on top of the ChertClient from src/comms/chert.ts (§3.4 trial iMessage, task D6 in §15.2).
+    - start(): poll chert.listMessages() every pollMs (no overlapping polls). The FIRST poll only records the ids it sees (old messages are not replayed). After that every new inbound message is emitted once to onMessage as { id, phone (E.164), text, at }; outbound messages are ignored. Dedupe by id with a bounded set. A failed poll is logged and retried at the next tick; three failures in a row log one warning.
+    - send(phone, text, idemKey?): chert.sendMessage with the given key or a generated one; text is cut to 4,000 characters; on failure retry once with the same key, then reject. Log only last4 of the phone.
+    - stop() clears the timer. Accept optional injected setInterval/clearInterval/now for tests.
+    Tests (test/imessage.test.ts) with a fake ChertClient and fake timers: no replay of history; a new inbound message is emitted exactly once over 100 polls; outbound ignored; poll failure does not stop polling; send retries once with the same key; long text is cut.
+  lease:
+  - src/comms/imessage.ts
+  - test/imessage.test.ts
+  depends_on:
+  - T13
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/imessage.test.ts
+  priority: must
+- id: T15
+  title: Audio mixer and synthesized sound effects
+  lane: comms
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write the pure audio pieces behind the single host audio track (§8.2, task D3 in §15.2). No files, no network: everything is Int16Array PCM math, mono, 24,000 Hz.
+    - src/comms/sfx.ts: `synthSfx(name, sampleRate)` generates each effect in code so the repo has no audio licensing questions: drumroll (about 3 s snare-like roll: filtered noise bursts speeding up with a swell), ding (bright bell, about 0.8 s, decaying partials), buzzer (about 0.5 s low square/saw), tada (short rising major arpeggio fanfare, about 1.2 s), tick (20 ms click). Peak below 80% full scale. Deterministic (seeded noise). Results are cached per name and rate.
+    - src/comms/mixer.ts: `createMixer()` with the Mixer interface from docs/API.md: a voice queue (addVoice appends, clearVoice drops it), any number of overlapping sfx (addSfx), nextFrame(samples) returns the mixed frame (voice + sfx, sfx ducked by 6 dB while voice plays, hard clip protection) and `level` = RMS of the VOICE part of that frame scaled to 0..1 (0 in silence) for the mouth flap; hasAudio() and voiceActive().
+    Tests (test/mixer.test.ts): every sfx has the expected length, is not silent and does not clip; mixing a drumroll over a voice buffer keeps both audible and inside int16 range; frames are exactly the requested size and pad with zeros at the end; level is 0 for silence and > 0.1 for a loud sine; clearVoice stops the voice but not the sfx.
+  lease:
+  - src/comms/mixer.ts
+  - src/comms/sfx.ts
+  - test/mixer.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/mixer.test.ts
+  priority: must
+- id: T16
+  title: ElevenLabs TTS client with disk cache and character budget
+  lane: text-to-speech
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/comms/tts.ts: `createTts(cfg)` with the Tts interface in docs/API.md section 5 (§8.2, §21.2; HTTP shape in docs/API.md section 6). Plain fetch (cfg.fetch injectable).
+    - synthesize(text, emotion): returns 24 kHz mono Int16Array, or null when it cannot (no key, no voice id, quota mode, HTTP error, timeout 8 s). Calls POST /v1/text-to-speech/{voiceId}/stream?output_format={format} with model_id and the voice_settings preset for the emotion (hype, drumroll, warm numbers in docs/API.md). If the format is pcm_16000, resample to 24 kHz (linear is fine). An odd trailing byte is dropped.
+    - Disk cache: key = sha256(voiceId, model, format, emotion, text) -> `{cacheDir}/{hash}.pcm` (default .cache/tts, already git-ignored). A cache hit makes no network call and costs no characters. Create the directory on demand; a broken cache file is ignored.
+    - Character budget: count the characters of every live request. At 70% of charBudget log one warning; at 90% switch to mode 'cached_only' (synthesize returns cached audio or null). stats() reports charsUsed, budget, cacheHits, cacheMisses, mode. The used count is saved in the cache directory so it survives restarts.
+    - warmCache(lines): for each line not cached yet, synthesize it with emotion 'hype', one at a time; stop when the mode flips to 'cached_only'; returns { generated, cached }.
+    - In-flight requests for the same key are shared. Never log the API key.
+    Tests (test/tts.test.ts) with a fake fetch and a temp cache directory (use node:os tmpdir): request URL, headers and body per emotion; second call is a cache hit with zero fetches; budget warning and cached_only switch; no key -> null without fetch; HTTP 401/429 -> null; warmCache counts; pcm_16000 input is resampled to 1.5x the samples. Use obviously fake key strings (for example "test-key").
+  lease:
+  - src/comms/tts.ts
+  - test/tts.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/tts.test.ts
+  priority: must
+- id: T17
+  title: 'Speech-to-text provider: ElevenLabs Scribe realtime'
+  lane: voice-speech-to-text
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/comms/stt.ts: `createSttProvider(cfg)` returning an SttProvider (src/contracts/ports.ts; §8.2 "Listening", §21.2 item 4; WebSocket URL and message names in docs/API.md section 6). Use the `ws` package; the WebSocket constructor is injectable (cfg.WebSocketImpl) for tests.
+    - start(): open the socket with the `xi-api-key` header; resolve when open (or after 3 s, so the game never waits). stop(): close it. pushAudio(pcm16k): send an `input_audio_chunk` message with base64 PCM; audio pushed while the socket is not open is dropped (keep at most 1 s buffered during connect).
+    - Incoming: `partial_transcript` -> onTranscript({ isFinal: false }); `committed_transcript` (and its with-timestamps variant) -> isFinal true. The exact field names are UNVERIFIED: read text from `text` or `transcript`, confidence from `confidence` if present else 0.9, ignore unknown message types, never throw on bad JSON.
+    - Reconnect with backoff (0.5 s, 1 s, 2 s, max 5 tries) if the socket drops while started. Without an API key or with provider 'none' return a provider that does nothing (TEXT MODE then carries the game). Providers 'openai' and 'deepgram' are not built: log one warning and behave like 'none'.
+    - Export a pure helper `int16ToBase64(pcm)`.
+    Tests (test/stt.test.ts) with a fake WebSocket class: connect URL and header; audio chunks are sent as valid base64 of the same bytes; partial and committed messages map to events; unknown or broken messages are ignored; reconnect after a drop; no key -> no socket is created.
+  lease:
+  - src/comms/stt.ts
+  - test/stt.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/stt.test.ts
+  priority: must
+- id: T18
+  title: 'LiveKit adapter: one room, one audio track, one video track'
+  lane: chert-bridge
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/comms/livekit.ts, the ONLY file in the repo that imports `@livekit/rtc-node` (installed, v1.x): `createLiveKitSession()` with the LiveKitSession interface in docs/API.md section 5 (§3.1, §0 item 6, §8.4). The API names in the spec are from memory: read node_modules/@livekit/rtc-node/dist/*.d.ts and use what is really there (Room, AudioSource, LocalAudioTrack, AudioFrame, VideoSource, LocalVideoTrack, VideoFrame, VideoBufferType, AudioStream, TrackPublishOptions, TrackSource, RoomEvent).
+    - connect(url, token): connect a Room (auto subscribe on), create ONE AudioSource (24,000 Hz mono) and publish it as a microphone track, create ONE VideoSource and publish it as a camera track, both from this same participant. Idempotent. disconnect() unpublishes and leaves.
+    - audioSink.write(pcm, sampleRate): when connected, captureFrame an AudioFrame (await it: that is the real-time backpressure); when not connected, resolve after the real duration of the chunk (so callers stay in real time) and drop the audio.
+    - videoSink(width, height): pushFrame wraps the RGBA bytes in a VideoFrame and captures it; no-op when not connected; never queue (drop the frame if the previous capture is still busy). The video source is created with the first size asked for (default 960x540).
+    - onRemoteAudio(cb): when a remote audio track is subscribed (prefer the one named `facetime-remote-audio`, else the first remote audio track), read it with an AudioStream at 16,000 Hz mono if the API allows asking for that rate, else resample with src/comms/resample.ts, and call cb with Int16Array frames. Handle track unsubscribed / participant left without throwing. onDisconnected(cb) fires on room disconnect.
+    - src/comms/resample.ts: pure `resampleInt16(pcm, fromRate, toRate)` (linear) and `stereoToMono`.
+    Log the participants and published tracks once after connect (exactly one audio publisher is a Chert rule). List what could not be verified without a real room under "TO VERIFY ON THE REAL LINE" in the header comment.
+    Tests: test/resample.test.ts for the pure helpers (lengths, a sine keeps its frequency, same-rate passthrough), and test/livekit.test.ts that imports the module, creates a session without connecting, and checks audioSink.write resolves and videoSink().pushFrame does not throw while disconnected. No real server in tests.
+  lease:
+  - src/comms/livekit.ts
+  - src/comms/resample.ts
+  - test/resample.test.ts
+  - test/livekit.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/resample.test.ts test/livekit.test.ts
+  priority: must
+- id: T19
+  title: 'VoicePort: host voice, SFX, mouth level and the STT gate'
+  lane: comms
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/comms/voice.ts: `createVoice({ sink, tts, stt, now? })` implementing VoicePort (src/contracts/ports.ts) plus pushRemoteAudio() and close(); see docs/API.md section 5, §8.2, §9.2 and tasks D3/D4 in §15.2. It combines the Mixer and synthSfx (src/comms/mixer.ts, sfx.ts), the Tts (src/comms/tts.ts) and an optional SttProvider. It writes to ONE AudioSink and nothing else.
+    - Pump: while anything is audible, pull 20 ms frames (480 samples at VOICE_SAMPLE_RATE 24000) from the mixer and `await sink.write(frame, 24000)`; the sink provides real-time pacing. When idle the pump stops (no busy loop).
+    - speak(id, text, { emotion }): pcm = await tts.synthesize(text, emotion ?? 'hype'); if audio came back, queue it in the mixer and resolve when its last frame has been written; if null (no key, quota, error), resolve after an estimated duration (about 65 ms per character, minimum 600 ms; an injectable `sleep` option lets tests make it instant) so captions still pace the game. Never rejects. Calls are serialized. stopSpeaking() clears the voice queue and resolves the pending speak.
+    - sfx(name): mix synthSfx over whatever is playing; resolves when it ends.
+    - onSpeakingChange(true/false) around each spoken line; onMouthLevel about 20 times per second while speaking (the frame level from the mixer) and one final 0.
+    - STT gate (§9.2 rules 1 and 2): listen(on) sets the wish. The gate is OPEN only when the wish is on AND the host is not speaking AND at least 400 ms have passed since the host stopped. pushRemoteAudio(pcm16k) forwards audio to stt.pushAudio only while the gate is open (this also saves credits). Transcripts from the provider are emitted through onSpeech only while the gate is open; anything arriving while it is closed is dropped. stt.start() is called lazily on the first listen(true).
+    Tests (test/voice.test.ts) with FakeAudioSink, a fake Tts and a fake SttProvider: speak writes exactly the samples of the clip (rounded up to whole frames) and resolves after them; null TTS still resolves; two speaks play in order; sfx over speech keeps one writer (never two sink.write calls in flight); mouth levels are > 0 during speech and end with 0; speaking-change order; the gate drops audio and transcripts while speaking and for 400 ms after (inject `now`), and passes them later; stopSpeaking resolves the pending speak.
+  lease:
+  - src/comms/voice.ts
+  - test/voice.test.ts
+  depends_on:
+  - T15
+  - T16
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/voice.test.ts
+  priority: must
+- id: T20
+  title: 'CallPort: Plan B outbound group call'
+  lane: calls
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/comms/call.ts: `createCallPort({ chert, session, env, pollMs?, now? })` implementing CallPort (src/contracts/ports.ts) with the ChertClient (src/comms/chert.ts), mintToken (src/comms/token.ts) and a LiveKitSession (src/comms/livekit.ts). Spec: §8.1 Plan B, §3.3, §3.4, task D2 in §15.2.
+    - connect(): room name `pil-{random}` (new room per call), agent identity `host-agent`, mint an agent token and session.connect(env.livekitUrl, token). Idempotent while connected.
+    - dial(phones): connect(); mint a FRESH bridge token (identity `chert-bridge-{random}`, same room, ttl 3600 s); chert.createCall with a new idempotency key; then poll chert.getCallEvents(callId) every pollMs (default 1000) until an event of type `bridge_ready` -> emit 'ready' { callId, at } exactly once. While waiting and during the call also poll chert.getCall: a terminal status emits 'ended' { reason } once and disconnects the session. Polling errors are logged and retried. dial() resolves with { callId } right after the 201 (the engine has its own dial timeout); it rejects with the ChertError (its `human` text in the message) when createCall fails.
+    - end(): chert.endCall(callId, newKey) (ignore errors), stop polling, session.disconnect(), emit 'ended' { reason: 'agent_end' } if it was not emitted yet. Safe to call with no call. After end() a new dial() must work (one active call per line).
+    - session.onDisconnected during a call -> emit 'ended' { reason: 'room_disconnected' } once.
+    - audioSink() and videoSink() return stable objects that forward to the session (videoSink uses env.stageW x env.stageH); onRemoteAudio forwards session.onRemoteAudio; latestCallerFrames() returns null (camera capture is an optional later task); roomHandle() = session.room().
+    - Missing Chert or LiveKit env: dial() rejects with a clear message; nothing crashes at construction.
+    Tests (test/call.test.ts) with a fake ChertClient, a fake LiveKitSession and fake timers: happy path order (connect before createCall; 'ready' only after bridge_ready); fresh token and new room per dial; createCall error rejects with the human message; terminal status -> 'ended' once; end() then dial() again works; room disconnect -> 'ended'; no double events. Use obviously fake LiveKit key strings in the test env (for example "test-key" and "test-secret-test-secret-test-secret").
+  lease:
+  - src/comms/call.ts
+  - test/call.test.ts
+  depends_on:
+  - T13
+  - T18
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/call.test.ts
+  priority: must
+- id: T21
+  title: 'agent.ts: wire the real ports to the engine'
+  lane: agent-ts
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/agent.ts (`npm start`), the one process that runs the game (§8.4, task D8 in §15.2). Everything it needs exists behind the factories listed in docs/API.md section 5 (read each file for its exact exports); this task is composition, not new logic.
+    - `buildAgent(env, overrides?)`: store = createStore(env); items = await store.loadReferenceItems(); { pricing, host } = createAi(env, { items, store }); chert = createChertClient(...); session = createLiveKitSession(); call = createCallPort({ chert, session, env }); tts = createTts(...); stt = createSttProvider(...); voice = createVoice({ sink: call.audioSink(), tts, stt }); call.onRemoteAudio(voice.pushRemoteAudio); message = createMessagePort({ chert }); stage = createStage({ width: env.stageW, height: env.stageH, fps: env.stageFps }); stage.start(call.videoSink()). Any port in `overrides` replaces the real one (tests pass fakes), and real factories for overridden ports are not constructed. EngineDeps: config = gameConfig({ demo: env.demo, lineDisplayNumber: env.lineDisplayNumber }), parseGuess and spokenAmount from src/speech, line = host.line, propItem = random item from the reference list, newGameId = time-based id. runner = createRunner({ ports, deps, reduce, initial: initialState(config), buildStageState, scheduler: optional from a third argument for tests }).
+    - `main()` (runs only when the file is executed directly): loadEnv(process.env, { readDotenv: true }), pino logger, print which integrations are live vs falling back (no secret values), buildAgent, tts.warmCache(staticLines()) in the background, runner.start(), and a clean shutdown on SIGINT/SIGTERM (runner.stop, call.end, store.flush, store.close). An uncaught error in a port must be logged, not kill the process.
+    - scripts/warm-tts.ts (`npm run warm:tts`): warm the TTS cache with staticLines() plus the name lines (guess.prompt, round.start, lobby.joined, guess.silent variants) for names passed as arguments, then print tts.stats().
+    - docs/verified.md: a table "TO VERIFY ON THE REAL LINE" collecting every such note from the headers of src/comms/*.ts, src/ai/*.ts and src/store/*.ts, each with how a human checks it, plus an empty "Observed" column.
+    Tests (test/agent.test.ts): buildAgent with an empty env and fake call/voice/message/stage overrides (from src/testing/fakes.ts) but the REAL engine, host lines, parser, pricing (no Gemini key -> list + fallback) and store (local mode) plays a 2-player game to the end under a VirtualScheduler, with real host line text spoken, the results card sent to both phones, and no unhandled rejections. Also check that importing src/agent.ts does not start anything.
+    If a factory from another lane does not match docs/API.md, do not edit it: adapt inside agent.ts and report the mismatch as a blocker note.
+  lease:
+  - src/agent.ts
+  - scripts/warm-tts.ts
+  - docs/verified.md
+  - test/agent.test.ts
+  depends_on:
+  - T01
+  - T03
+  - T04
+  - T07
+  - T12
+  - T14
+  - T17
+  - T19
+  - T20
+  - T27
+  - T33
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/agent.test.ts
+  priority: must
+- id: T22
+  title: Host line bank and HostPort.line
+  lane: host-script-and-personality-pr
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/ai/host/lines.ts (§12, task A5 in §15.3) with `LINE_BANK`, `staticLines()` and `createHost(opts?)` as in docs/API.md section 5. Keys and their allowed variables are frozen in src/contracts/hostLines.ts (HOST_LINE_KEYS, HOST_LINE_VARS).
+    - LINE_BANK: every key with the variants from §12.2, word for word. Two keys are split out of the spec text: `reveal.price` is just "{price}!" and `reveal.estimate` is "That's my best estimate!"; `score.stump` has the two normal variants and `score.stumplow` is "{owner} got {n} stump points. Tough crowd!". `item.quip` holds the three canned quips. Variables are written as {name}. Add one or two extra variants in the same voice where the spec has only one, following the personality rules of §12.1 (kind, never mean, no emoji, no prices, at most 18 words).
+    - createHost({ rng, quip }): line(key, vars) picks a variant at random (rng injectable) but never the same variant twice in a row for a key that has 2+ variants, and fills every {var}. A missing variable must never reach the players as a raw brace: replace it with an empty string, tidy double spaces, and log a warning. quip() calls opts.quip when given, else resolves null.
+    - staticLines(): every variant that contains no {var} (for the TTS warm cache).
+    Tests (test/lines.test.ts): every key in HOST_LINE_KEYS exists with at least one variant; variants only use variables allowed by HOST_LINE_VARS; after filling with 12-character names and "one thousand two hundred dollars and ninety-nine cents" no line has a leftover brace, an emoji, or more than 140 characters (reveal.price is exempt from the length check); no immediate repeats over 200 draws; a missing variable leaves no brace; staticLines has no braces and at least 15 entries.
+  lease:
+  - src/ai/host/lines.ts
+  - test/lines.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/lines.test.ts
+  priority: must
+- id: T23
+  title: Item text cleaning and reference-list matching
+  lane: item-identification-and-pricin
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/ai/cleanText.ts and src/ai/matchList.ts (§10.3 steps 1 and 2, tasks A2 and A8 in §15.3). Pure functions, no network. Use fixtures/reference-items.sample.json (20 items) in tests; the real list (data/reference-items.json) arrives later with the same shape.
+    - cleanItemText(raw): lowercase, strip emoji and punctuation noise, drop filler ("my", "a", "an", "the", "this is", "it's", "i have", "some"), keep brand, model and size words, collapse spaces. `rejected: true` for empty text, text with no letters, text over 80 characters, or obviously not a product (a small blocklist of insults and slurs, "nothing", "idk"); rejected items go to the prop closet.
+    - matchList(cleanText, items, k = 5): score each item 0..1 as the max of (a) exact alias or exact name hit = 1.0, (b) alias contained as whole words in the text (0.9), (c) Dice coefficient on word tokens between the text and the name / each alias, with a bonus when the brand word (first word of the name) appears, and light typo tolerance (edit distance 1 on words of 5+ letters). Detect size conflicts: both the text and the item's name/sizeNote mention a size in the same unit (oz, ml, l, pack, count, inch, gb, w) and the numbers differ -> sizeConflict true and the score is capped at 0.8. Return the top k, best first, deterministic on ties (by id).
+    - Export `LIST_ACCEPT = 0.85` and `LIST_MAYBE = 0.6`.
+    Tests (test/matchList.test.ts): 30 strings against the sample list (aliases, typos like "owalla bottle", brand only like "owala", with size "stanley 40 oz", noise like "my Owala bottle!!", word order) with the right item at top-1 for at least 27; "owala 32 oz" flags a size conflict; unrelated text ("garden hose") scores under 0.6 everywhere; 20 cleanItemText cases including rejects.
+  lease:
+  - src/ai/cleanText.ts
+  - src/ai/matchList.ts
+  - test/matchList.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/matchList.test.ts
+  priority: must
+- id: T24
+  title: Gemini client wrapper and price estimate
+  lane: ai
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/ai/gemini.ts and src/ai/estimate.ts (§10.3 step 4, §21.3; docs/API.md sections 5 and 6). SDK: `@google/genai` (installed, v3). Its API in the spec is from memory: read the type definitions in node_modules/@google/genai and use what is really there.
+    - createGemini({ apiKey, model, sdk? }): `available` is false without a key, and then every method resolves null without any call. `sdk` lets tests inject a fake object with `models.generateContent`.
+      - json({ prompt, schema, timeoutMs, system?, imagesJpeg? }): temperature 0, asks for JSON (responseMimeType application/json), parses the text (also when wrapped in a ```json fence), validates with the zod schema, returns the value or null. One retry on error or invalid JSON within the same overall timeoutMs. imagesJpeg become inline image parts.
+      - grounded({ prompt, timeoutMs }): one call with `tools: [{ googleSearch: {} }]` and plain text output; returns { text, sources } with sources read from candidates[0].groundingMetadata.groundingChunks[].web (uri, title), deduped; sources [] when there is no grounding metadata. null on timeout or error.
+      - text({ prompt, system?, timeoutMs }): plain text or null.
+      - Every call is raced against its timeout; nothing ever throws. Never log the key.
+    - estimatePrice(gemini, cleanText, examples, timeoutMs = 6000): asks for the typical NEW, regular US retail price as JSON { displayName, priceCents, confidence 0..1, notAProduct }, with up to 5 reference items given as calibration examples ("other items on our price list: name = $x.xx"). Rules in the prompt: no used or resale prices, no bundles, no shipping. Clamp priceCents to 100..100000. Returns null when Gemini is unavailable or fails.
+    Tests (test/gemini.test.ts) with a fake sdk: valid JSON parsed; fenced JSON parsed; invalid JSON retried once then null; a hanging call returns null at the timeout (use a small timeout); no key -> null and zero sdk calls; grounded extracts and dedupes sources and tolerates missing metadata; estimatePrice clamps, includes the examples in the prompt and returns null on failure.
+  lease:
+  - src/ai/gemini.ts
+  - src/ai/estimate.ts
+  - test/gemini.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/gemini.test.ts
+  priority: must
+- id: T25
+  title: Web price lookup with Gemini Google Search grounding
+  lane: ai-and-vision
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/ai/webSearch.ts: `createGeminiSearch(gemini): SearchProvider` (src/contracts/ports.ts; §10.3 step 3, task A3 in §15.3) on top of GeminiClient from src/ai/gemini.ts.
+    - search(query): step 1 `gemini.grounded` with a prompt asking for the current NEW, regular US retail price of "{query}" from major retailers or the manufacturer, listing each price found with its store, ignoring used items, resellers, bundles and shipping. Step 2 `gemini.json` turns that text into { displayName, prices: [{ cents, store }] } (the two-call fallback of §10.3: grounding and JSON in one call is UNVERIFIED). Use about 4 s for step 1 and 2 s for step 2.
+    - Price choice: with 2+ distinct prices take the median after dropping outliers above 3x the median; with one, use it; with none, priceCents null.
+    - Return { priceCents, sources (from the grounded call's metadata), text }. No grounding sources -> priceCents null (we only call a price "web" when it is really grounded). Gemini unavailable or failing -> { priceCents: null, sources: [], text: '' }. Never throws.
+    - Export pure helpers `pickPrice(cents[])` and `agreeWithin(cents[], tolerance)` (do 2+ prices agree within 20%: the pipeline uses it for confidence 0.9 vs 0.75), and return the extracted prices on the result object as an extra optional field `prices?: number[]` so the pipeline can call agreeWithin.
+    - Write what a human must check with a real key (one-call vs two-call, grounding on the free key) in the header comment under "TO VERIFY ON THE REAL LINE".
+    Tests (test/webSearch.test.ts) with a fake GeminiClient: median and outlier rule; one price; no prices; no sources -> null price even when a price was extracted; grounded null -> empty result; bad JSON step -> null price with sources kept.
+  lease:
+  - src/ai/webSearch.ts
+  - test/webSearch.test.ts
+  depends_on:
+  - T24
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/webSearch.test.ts
+  priority: must
+- id: T26
+  title: 'Pricing pipeline: PricingPort.price'
+  lane: item-identification-and-pricin
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write src/ai/pricing.ts: `createPricing({ items, gemini, search?, store?, timeoutMs = 8000, webTimeoutMs = 6000 })` returning PricingPort (§10.1, §10.3, task A1 in §15.3). It uses cleanItemText and matchList (src/ai/cleanText.ts, matchList.ts), estimatePrice (src/ai/estimate.ts) and an injected SearchProvider (interface in src/contracts/ports.ts; the Gemini implementation is another task, so tests use a fake).
+    price(req) NEVER throws and ALWAYS resolves within timeoutMs:
+    1. A rejected clean text -> step 6.
+    2. Cache: in-memory Map by clean text, then store.getCachedPrice (if a store was given). A hit returns with the new itemId.
+    3. List match: best score >= 0.85 and no size conflict -> source 'list', priceCents and displayName from the item, confidence = score, evidence kind 'list'.
+    4. Otherwise run web search and estimate IN PARALLEL: search.search(clean) (skip when search is null) and estimatePrice(gemini, clean, top 5 list matches). If the web result arrives within webTimeoutMs with a price -> source 'web', confidence 0.9 when 2+ prices agree within 20% else 0.75, evidence kind 'web' (title, url). Else the estimate -> source 'estimate', isEstimate true, evidence kind 'model'.
+    5. No Gemini at all (no key, or both failed): fall back to the best list match if its score >= 0.6 (source 'estimate', isEstimate true, confidence 0.4, that item's price), else a fixed estimate (the median price of the list, confidence 0.2, propClosetSuggested true). Log one clear warning the first time the key is missing.
+    6. Not a product / rejected / model says notAProduct -> source 'estimate', isEstimate true, propClosetSuggested true.
+    7. Always: clamp priceCents to 100..100000, isEstimate = source 'estimate' or confidence < 0.5, latencyMs measured, displayName = list name or the model's clean product name (title-cased clean text as a last resort). Successful list and web results are cached in memory and sent to store.persist('priceCache', { cleanText, result, createdAt }).
+    8. A hard overall timer returns the step-5 fallback at timeoutMs no matter what is still pending.
+    identifyFromFrames(jpegs): accept an optional `identify` function in the options and call it; without one, resolve null.
+    Tests (test/pricing.test.ts) with the sample list, a fake GeminiClient and a fake SearchProvider: 10 known items come back from the list with the right price; a list miss uses the web result; web too slow -> estimate; Gemini hanging forever -> still resolves by the timeout (use small timeouts); no key -> list-only fallback and no throw; "asdfgh" -> estimate or prop-closet flag, no crash; size conflict goes to web/estimate; second call is a cache hit; results always within 100..100000 and correctly labelled isEstimate.
+  lease:
+  - src/ai/pricing.ts
+  - test/pricing.test.ts
+  depends_on:
+  - T23
+  - T24
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/pricing.test.ts
+  priority: must
+- id: T27
+  title: 'AI wiring: createAi and the A/B/C eval variants'
+  lane: ai
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Finish the ai lane's public surface (docs/API.md section 5; §10.4, task A9 in §15.3).
+    - src/ai/index.ts: `createAi(env, { items, store })` builds gemini = createGemini({ apiKey: env.geminiApiKey, model: env.geminiModel }), search = env.searchProvider === 'gemini' && gemini.available ? createGeminiSearch(gemini) : null, pricing = createPricing({ items, gemini, search, store }), host = createHost(). Returns { pricing, host, gemini }. Works with an empty env (everything falls back, nothing throws).
+    - src/ai/variants.ts: `makeVariants({ items, gemini, search })` returning { A, B, C }, each `(rawText) => Promise<VariantResult>`:
+      - A, AI alone: estimatePrice with NO examples, no list, no search.
+      - B, list + AI: list match when score >= 0.85 without size conflict, else estimatePrice with the top 5 list matches as examples. No search.
+      - C, full pipeline: the same code path the game uses (createPricing with the search provider, a fresh instance per call so runs are independent and nothing is cached across items).
+      Each returns { priceCents (null when nothing real came back, including the no-Gemini fixed fallback), displayName, source, latencyMs } and never throws.
+    - docs/ai-notes.md: which Gemini features are used where (grounding in webSearch.ts, JSON estimates in estimate.ts, the list match), model env vars, timeouts, the free-tier privacy rule (§21.3: text path only; camera frames are not sent by default), and the "TO VERIFY" items that need a real key (model names, grounding on the free key).
+    Tests (test/variants.test.ts) with fake gemini and search: A never touches the list or search; B uses the list for a known alias and the examples for a miss; C returns a web price when the fake search has one; all three survive a failing Gemini (priceCents null, no throw); createAi with an empty env returns working ports and prices "owala bottle" from the sample list.
+  lease:
+  - src/ai/index.ts
+  - src/ai/variants.ts
+  - docs/ai-notes.md
+  - test/variants.test.ts
+  depends_on:
+  - T22
+  - T25
+  - T26
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/variants.test.ts
+  priority: must
+- id: T28
+  title: 'Stage core: background, marquee, HUD and podiums'
+  lane: stage
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Stage basics (§13): the agent's video is a drawn retro game show stage, 960x540, drawn with `@napi-rs/canvas` (installed; `createCanvas(960, 540).getContext('2d')`). Palette, fonts, layout boxes and podium positions are frozen in src/stage/theme.ts: draw inside those boxes so the layers written in parallel fit together. Realistic StageState objects for every phase and 2/3/4 players: fixtures/stage-states.ts (stageFixture, allStageFixtures, stressStageFixture). Every draw function is pure: (ctx, data, time) -> pixels, no globals except caches, no Date.now. Use ctx.save()/restore() and leave the context as you found it. Tests draw onto a real canvas and check pixels or measurements; while developing, write PNGs to out/ (git-ignored) and LOOK at them.
+
+    Write the static look and the always-on layers (§13.1, §13.2, task E1 in §15.1), signatures in docs/API.md section 5:
+    - src/stage/fonts.ts `registerFonts()`: registers Bungee and Lilita One with GlobalFonts if the .ttf files exist in src/stage/assets/fonts/ (if you have network access, download both from Google Fonts with their OFL license files; if not, skip: theme.FONTS already lists fallbacks). Safe to call twice.
+    - src/stage/background.ts `drawBackground(ctx, nowMs)`: navy stage, red velvet curtains left (x 0..150) and right (810..960), a sunburst behind the host box, checkerboard floor from y=440, all pre-rendered once to an offscreen canvas and blitted; then the marquee sign "THE PRICE IS LIVE" (gold, title font) with a border of bulbs that alternate on/off at 2 Hz from nowMs.
+    - src/stage/hud.ts `drawHud(ctx, s, nowMs)`: round label, turn-order strip (one chip per player in seat color; current chip bigger with a gold outline; done chips show a check), join hint banner, mystery item card ("?" box and "MYSTERY ITEM from {mysteryOwner}"), banner, fallback badge pill, and the call clock "TIME LEFT 0:32" in alert red when capRemainingMs is set. Each only when its StageState field is non-null. Do not draw the caption, host, timer, reveal or finale: other tasks own those.
+    - src/stage/podium.ts `drawPodiums(ctx, s, nowMs)`: one podium per entry at podiumXs(count): seat-color body, name plate (shrink the font until a 12-character name fits), score, guess chip under the score ("$25.00 ?" pending, green check locked, gray "—" silent, red tint + "OVER" for over), gold glow + "OWNER" tag for the owner, a spotlight cone and pulsing outline for the guesser, a crown for the winner, and the liveTranscript fragment above the current guesser's podium. Zero podiums draws nothing.
+    Tests (test/stage.core.test.ts): each function runs for every fixture without throwing; the marquee area differs between nowMs 0 and 250 (bulbs) while the curtain area does not; 2, 3 and 4 podiums land inside the 48..912 safe area without overlapping (export a small `podiumBoxes(count)` helper and test it); a 12-character name fits its plate (export the fitting helper and assert measured width <= plate width); drawing 300 frames of background + hud + podiums averages under 30 ms per frame (print the number).
+  lease:
+  - src/stage/fonts.ts
+  - src/stage/background.ts
+  - src/stage/hud.ts
+  - src/stage/podium.ts
+  - src/stage/assets/**
+  - test/stage.core.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/stage.core.test.ts
+  priority: must
+- id: T29
+  title: Host sprite (Chip Dollar) with mouth flap
+  lane: host-avatar-and-stage-video
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Stage basics (§13): the agent's video is a drawn retro game show stage, 960x540, drawn with `@napi-rs/canvas` (installed; `createCanvas(960, 540).getContext('2d')`). Palette, fonts, layout boxes and podium positions are frozen in src/stage/theme.ts: draw inside those boxes so the layers written in parallel fit together. Realistic StageState objects for every phase and 2/3/4 players: fixtures/stage-states.ts (stageFixture, allStageFixtures, stressStageFixture). Every draw function is pure: (ctx, data, time) -> pixels, no globals except caches, no Date.now. Use ctx.save()/restore() and leave the context as you found it. Tests draw onto a real canvas and check pixels or measurements; while developing, write PNGs to out/ (git-ignored) and LOOK at them.
+
+    Draw the host and his mouth logic (§13.3 "Mouth flap", "Host poses", §13.4, task E2 in §15.1), signatures in docs/API.md section 5:
+    - src/stage/mouth.ts `createMouthTracker()`: update(level, speaking, nowMs) -> 'closed' | 'half' | 'wide'. While speaking: opens when level > 0.18, closes when < 0.10 (hysteresis), 'half' up to 0.35, 'wide' above 0.35, and a shape is held at least 80 ms (no flicker). level null while speaking -> toggle closed/half at 6 Hz. Not speaking -> 'closed'.
+    - src/stage/host-sprite.ts `drawHost(ctx, { pose, mouth, nowMs })`: Chip Dollar, our own cartoon retro game show host, built only from vector shapes in code (no image files): round friendly head, slicked hair with a swoosh, big smile, red suit with gold trim, bow tie, a handheld retro microphone; flat colors with thick dark outlines (theme.COLORS). He stands inside LAYOUT.host (330,100, 300x250). Poses: idle (mic held low), talking (mic up), reveal (arm raised, wide mouth held), celebrate (both arms up). Mouth shapes closed (small smile), half, wide. He blinks for about 120 ms every 3 to 5 s and bobs 2 px while talking, both derived from nowMs only. Keep it cheap (well under 5 ms per draw).
+    Tests (test/stage.host.test.ts): feeding a sine-wave level produces closed, half and wide, and no two shape changes are closer than 80 ms; the hysteresis thresholds; null level toggles at about 6 Hz; not speaking is always closed; drawHost paints pixels inside the host box and nothing outside it (check a margin) for all 4 poses x 3 mouths; the three mouths give different pixels in the mouth area. Also write a preview strip PNG (closed, half, wide and the 4 poses) to out/stage/host-strip.png from the test so a human can look at him.
+  lease:
+  - src/stage/host-sprite.ts
+  - src/stage/mouth.ts
+  - test/stage.host.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/stage.host.test.ts
+  priority: must
+- id: T30
+  title: 'Captions: wrap, fit and word-by-word reveal'
+  lane: captions
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Stage basics (§13): the agent's video is a drawn retro game show stage, 960x540, drawn with `@napi-rs/canvas` (installed; `createCanvas(960, 540).getContext('2d')`). Palette, fonts, layout boxes and podium positions are frozen in src/stage/theme.ts: draw inside those boxes so the layers written in parallel fit together. Realistic StageState objects for every phase and 2/3/4 players: fixtures/stage-states.ts (stageFixture, allStageFixtures, stressStageFixture). Every draw function is pure: (ctx, data, time) -> pixels, no globals except caches, no Date.now. Use ctx.save()/restore() and leave the context as you found it. Tests draw onto a real canvas and check pixels or measurements; while developing, write PNGs to out/ (git-ignored) and LOOK at them.
+
+    Captions carry the whole game when audio is silent (§13.2 "Caption bar", §13.3 last bullet, task E4 in §15.1). Write src/stage/captions.ts (signatures in docs/API.md section 5):
+    - `wrapCaption(text, measure, maxWidth)`: greedy word wrap into lines using the given measure function; a single word wider than the line is split.
+    - `fitCaption(ctx, text)`: starts at theme.CAPTION.fontPx (28) in the body font and shrinks (not below 20 px) until the text fits in CAPTION.maxLines (2) lines inside the caption box minus padding and the "CHIP:" tag; if it still does not fit at 20 px, cut with an ellipsis. Returns { lines, fontPx }.
+    - `drawCaption(ctx, caption, msSinceShown, speaking)`: nothing when caption is null. A black 70% rounded bar in LAYOUT.caption; a gold "CHIP:" tag (16 px) for speaker 'host', no tag and cream italic text for 'system'; the text in cream. Words appear one by one over an estimated speech time (about 65 ms per character of the whole line, so the caption keeps pace with the voice); once all words are shown and `speaking` is false, it stays theme.CAPTION.holdMs (1500 ms) and then fades out over 300 ms.
+    - Export `captionWordsVisible(text, msSinceShown)` (pure) for tests.
+    Tests (test/stage.captions.test.ts): every line in §12.2 (copy the bank text into the test as a plain array; do not import the ai lane) filled with 12-character names such as "Maximilliano" and the amount "one thousand two hundred dollars and ninety-nine cents" fits in 2 lines at 28 px or shrinks to at most 2 lines at >= 20 px; the longest rules line fits; the word reveal count grows with time and reaches all words; a null caption draws nothing; the bar stays inside its box (pixels outside LAYOUT.caption are untouched).
+  lease:
+  - src/stage/captions.ts
+  - test/stage.captions.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/stage.captions.test.ts
+  priority: must
+- id: T31
+  title: 'Overlays: countdown ring, drumroll and price pop'
+  lane: overlays
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Stage basics (§13): the agent's video is a drawn retro game show stage, 960x540, drawn with `@napi-rs/canvas` (installed; `createCanvas(960, 540).getContext('2d')`). Palette, fonts, layout boxes and podium positions are frozen in src/stage/theme.ts: draw inside those boxes so the layers written in parallel fit together. Realistic StageState objects for every phase and 2/3/4 players: fixtures/stage-states.ts (stageFixture, allStageFixtures, stressStageFixture). Every draw function is pure: (ctx, data, time) -> pixels, no globals except caches, no Date.now. Use ctx.save()/restore() and leave the context as you found it. Tests draw onto a real canvas and check pixels or measurements; while developing, write PNGs to out/ (git-ignored) and LOOK at them.
+
+    The wow moment (§13.3 "Countdown ring", "Drumroll", "Price pop", task E3 in §15.1). Write src/stage/overlays.ts (signatures in docs/API.md section 5):
+    - `drawTimerRing(ctx, timer, msSinceSet)`: in LAYOUT.timerRing, a ring of radius 80 that sweeps clockwise to empty over timer.total seconds. Seconds left now = timer.secondsLeft - (timer.running ? msSinceSet / 1000 : 0), clamped at 0. The whole seconds left are shown in the middle (title font, about 90 px). Cream until 4 s, then alert red and pulsing; at 3, 2, 1 the digit scales 1.3 -> 1.0 over 250 ms; at 0 the ring flashes red for 300 ms. Export pure `timerSecondsLeft(timer, msSinceSet)`.
+    - `drawReveal(ctx, reveal, msSinceStage, lightning)`: stage 'none' draws nothing.
+      - 'drumroll': a dim overlay fading in to 55%, two spotlight beams sweeping left and right, and in the center a slot-machine style "$ ?? . ??" whose digits flicker at 10 Hz (derive the digits from msSinceStage so it is deterministic).
+      - 'price': a white flash on the first 60 ms, a starburst, then reveal.priceText in the title font, about 150 px, gold with a black outline, popping in with scale 0 -> 1.25 -> 1.0 over 500 ms (ease-out-back) and SHRUNK to fit the safe width for long prices such as "$1,000.00"; reveal.itemName below in the body font, about 40 px, cream, shrunk or cut with an ellipsis to fit; reveal.sourceLabel small underneath; if reveal.isEstimate a red "ESTIMATE" stamp rotated -8 degrees that does not cover the price digits.
+      - Export pure helpers `popScale(ms)` and `fitFontPx(ctx, text, family, startPx, maxWidth)`.
+    Tests (test/stage.overlays.test.ts): timerSecondsLeft math (running and not); the ring's red phase starts at 4 s (sample a pixel on the ring); popScale goes 0 -> above 1.2 -> 1.0 and stays 1.0 after 500 ms; "$1,000.00", "$0.99" and "$34.99" all fit inside x 48..912 (measure with the fitted font); the estimate stamp's bounding box (export it) does not intersect the price text box; drumroll frames differ over time; stage 'none' leaves the canvas untouched. Write a few PNGs to out/stage/ so a human can look.
+  lease:
+  - src/stage/overlays.ts
+  - test/stage.overlays.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/stage.overlays.test.ts
+  priority: must
+- id: T32
+  title: Score fly and finale scoreboard
+  lane: overlays
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Stage basics (§13): the agent's video is a drawn retro game show stage, 960x540, drawn with `@napi-rs/canvas` (installed; `createCanvas(960, 540).getContext('2d')`). Palette, fonts, layout boxes and podium positions are frozen in src/stage/theme.ts: draw inside those boxes so the layers written in parallel fit together. Realistic StageState objects for every phase and 2/3/4 players: fixtures/stage-states.ts (stageFixture, allStageFixtures, stressStageFixture). Every draw function is pure: (ctx, data, time) -> pixels, no globals except caches, no Date.now. Use ctx.save()/restore() and leave the context as you found it. Tests draw onto a real canvas and check pixels or measurements; while developing, write PNGs to out/ (git-ignored) and LOOK at them.
+
+    The end of a round and the end of the game (§13.3 "Score fly" and "Finale", task E3 in §15.1). Write src/stage/finale.ts (signatures in docs/API.md section 5):
+    - `drawScoreFly(ctx, s, msSincePhase)`: for phase round_score. For each podium with a `delta`: guess points float up from the podium ("+86", green), then the bonus ("+25 BONUS", gold), then the owner's stump points ("+38 STUMP!", purple), each over about 1 s, staggered; zero values are skipped. Use theme.podiumXs(count) for positions. Export pure `scoreFlyItems(s, msSincePhase)` returning what is visible (text, color, x, y, alpha) so it can be tested without pixels.
+    - `drawFinale(ctx, s, msSincePhase)`: when s.finale is set. A dim overlay; a banner "CHAMPION: {name}!" or "CO-CHAMPIONS: {a} & {b}!" (shrink to fit); a ranked scoreboard (place, name, total; first place biggest and gold) that slides in over 600 ms; confetti (at most 200 particles, deterministic from a seeded pseudo-random and msSincePhase, about 6 s); a bottom strip with s.finale.items joined by " · " (shrink or cut to fit); and the small credit line theme.CREDIT_LINE at the very bottom inside the safe area. Works for 2, 3 and 4 players and for a 2-way tie.
+    Tests (test/stage.finale.test.ts): scoreFlyItems shows guess, then bonus, then stump in order and skips zeros; nothing for podiums without delta; drawFinale runs for the finale fixtures of 2, 3 and 4 players and for a tie, keeps 12-character names inside the safe area (export the layout boxes and assert), draws the credit line (export its position and check pixels changed there), and two different times give different confetti pixels while the same time gives identical pixels (deterministic). Write PNGs to out/stage/ so a human can look.
+  lease:
+  - src/stage/finale.ts
+  - test/stage.finale.test.ts
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/stage.finale.test.ts
+  priority: must
+- id: T33
+  title: Compose the renderer, StagePort and the preview script
+  lane: stage
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Stage basics (§13): the agent's video is a drawn retro game show stage, 960x540, drawn with `@napi-rs/canvas` (installed; `createCanvas(960, 540).getContext('2d')`). Palette, fonts, layout boxes and podium positions are frozen in src/stage/theme.ts: draw inside those boxes so the layers written in parallel fit together. Realistic StageState objects for every phase and 2/3/4 players: fixtures/stage-states.ts (stageFixture, allStageFixtures, stressStageFixture). Every draw function is pure: (ctx, data, time) -> pixels, no globals except caches, no Date.now. Use ctx.save()/restore() and leave the context as you found it. Tests draw onto a real canvas and check pixels or measurements; while developing, write PNGs to out/ (git-ignored) and LOOK at them.
+
+    Put the layers together (§8.4 frame loop, §13.5, tasks E1 and E5 in §15.1). The layers exist: background.ts, hud.ts, podium.ts, fonts.ts, host-sprite.ts, mouth.ts, captions.ts, overlays.ts, finale.ts (their signatures are in docs/API.md section 5; read the files for the exact exports and adapt to what is really there).
+    - src/stage/render.ts `createRenderer({ width, height })`: owns one canvas and the timestamps of the last change of phase, reveal.stage, caption.text and timer (detected by comparing with the previous state passed to render). `render(s, nowMs, mouthLevel)` draws in this order: background, hud, host (pose: celebrate in finale, reveal while reveal.stage is 'price', talking while s.hostSpeaking, else idle; mouth from a mouth tracker fed with mouthLevel), timer ring (when s.timer is set), podiums, caption, score fly (round_score), reveal overlay, finale; and returns the RGBA bytes (width*height*4). `png(s, nowMs?)` renders with settled animations (pretend each change happened 2 s ago, so screenshots show the final look) and returns a PNG buffer. If width/height differ from 960x540, scale the 960x540 drawing to fit (letterbox). A layer that throws is caught, logged once and skipped: the video must never stop.
+    - src/stage/index.ts `createStage({ width, height, fps })` implementing StagePort (src/contracts/ports.ts): setState, setMouthLevel, renderPng, start(sink) runs a timer at fps that renders the latest state with the latest mouth level and calls sink.pushFrame(rgba, width, height); if a frame takes longer than the interval the next one is skipped, never queued; stop() clears the timer. Before the first setState it shows an idle state (title only) so the video is never blank. Accept optional injected now/setInterval/clearInterval for tests.
+    - scripts/preview-stage.ts (`npm run preview:stage`): writes out/stage/{phase}-{n}p.png for every entry of allStageFixtures() plus stress.png, then renders 300 frames of a mixed sequence and prints the average and worst frame time; exits 1 if the average is over 30 ms. Look at the PNGs: fix overlaps you can fix in your own files, and report anything wrong in another layer as a blocker note.
+    Tests (test/stage.render.test.ts): render returns width*height*4 bytes for every fixture; frames at two times differ (animation) and the same (state, time, mouth) sequence is repeatable; png() starts with the PNG signature; a renderer whose layer is forced to throw still returns a frame; createStage with FakeVideoSink (src/testing/fakes.ts) and fake timers pushes frames at about the asked fps and stops on stop(); the reveal overlay is not drawn for the guess_listen fixture (export a small "layers drawn" debug list from render and assert on it).
+  lease:
+  - src/stage/render.ts
+  - src/stage/index.ts
+  - scripts/preview-stage.ts
+  - test/stage.render.test.ts
+  depends_on:
+  - T28
+  - T29
+  - T30
+  - T31
+  - T32
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run preview:stage
+  - npm install --no-audit --no-fund --silent && npx vitest run test/stage.render.test.ts
+  priority: must
+- id: T34
+  title: Devpost and pitch drafts
+  lane: devpost
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write the submission text the team will paste (§20, §21.6, §21.7, §14.4, task E8 in §15.1). The humans post it; you never post anything.
+    - docs/devpost.md, paste-ready: project name (The Price Is Live), a one-line tagline, Inspiration, What it does, How we built it, Challenges, Accomplishments, What we learned, What's next, Built with (TypeScript, Node, LiveKit, Chert FaceTime + iMessage, ElevenLabs, Gemini, MongoDB Atlas, @napi-rs/canvas), the track list to tick ("Best Use of FaceTime (Chert)", "Best Project Built with ElevenLabs", "MLH Best Use of Gemini API", "MLH Best Use of MongoDB Atlas"), one sponsor paragraph each for Chert, ElevenLabs, Gemini and MongoDB Atlas (start from the drafts in §21.6), a screenshot list (stage PNGs come from `npm run preview:stage` in out/stage/), and the submission checklist of §21.7 as checkboxes for the humans.
+    - docs/pitch.md: the 30 seconds before and 30 seconds after the demo (§14.4), the timed demo script table (§14.3), and three likely judge questions with short honest answers.
+    HONESTY RULES: only claim what the code really does. Write the measured number as the placeholders {N}, {X}, {Y} (a later task fills them from eval/report.md). Do NOT claim: the SpaceXSI A-Team track (not entered), camera item identification, Atlas Vector Search or embeddings, model-written quips, inbound calls (Plan A): these are optional extras that may not ship; put them in a clearly marked section "Only if built (delete otherwise)" with one sentence each. Say that reference and held-out prices are list prices with a verified/unverified flag. Plain everyday words, short sentences, no hype words.
+  lease:
+  - docs/devpost.md
+  - docs/pitch.md
+  depends_on: []
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && node scripts/check-docs.mjs devpost
+  priority: must
+- id: T35
+  title: README with one section per sponsor
+  lane: lead-design
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Finish README.md for the public repo (§21.1: judges look for each sponsor integration "in code, README, or demo"). Keep the existing title, pitch and License section; replace every TODO.
+    - What it is (3 sentences), a stage screenshot placeholder path (docs/img/stage.png; say how to make it with `npm run preview:stage`), how a game works (join by text, start, rounds, results text, rematch).
+    - Quick start: install, `npm run check`, `npm run sim`, `npm run demo:check`, and the real run (`npm run doctor`, `npm start`, link to docs/runbook.md).
+    - Architecture: the runtime picture from docs/API.md section 3 and a table of folders.
+    - "How we use Chert", "How we use ElevenLabs", "How we use Gemini", "How we use MongoDB Atlas": for each, 3 to 6 bullet points that say exactly what the code does, each with a link to the real file. Open every file you link and describe only what is really in it; if a planned piece is missing or is a fallback (for example no vector search, no camera identification), say so or leave it out. Mention the ElevenLabs voice settings presets and the TTS cache, Gemini Google Search grounding and the A/B/C eval, the Atlas collections and the never-blocks queue.
+    - "The measured number": link to eval/report.md and data/HELDOUT.md; quote numbers only if eval/results.json exists and is not a mock, else say it is produced by `npm run eval`.
+    - Honest limits (what needs a real line to verify: link docs/verified.md), team (Ethan Meza, Diego, Akshi, Aditri), "built during HackUTA 2026", MIT license.
+    No secrets, no real phone numbers. Every relative link must point to a file that exists.
+  lease:
+  - README.md
+  depends_on:
+  - T21
+  - T11
+  - T10
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && node scripts/check-docs.mjs readme
+  - npm install --no-audit --no-fund --silent && npm run scan:secrets
+  priority: must
+- id: T36
+  title: Measured-number writeup
+  lane: and-the-measured-number-write-
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Write the one honest number into the submission text (§17.3 "Goal" and "Honest limits", §20, lesson 1 in §2).
+    - Read eval/report.md and eval/results.json (if present).
+    - If they hold a REAL run (eval/results.json exists and has no `"mock": true`): write docs/measured-number.md with the sentence "On N items our pricing had never seen, the host was within 15% of the real shelf price X% of the time, versus Y% for the AI alone." using the exact N, X (variant C) and Y (variant A) from the report, plus the B number, the within-25% numbers, the Wilson interval, the split by tier, how many held-out prices are verified, and the honest limits. Then replace the {N}, {X}, {Y} placeholders in docs/devpost.md and docs/pitch.md with the same exact numbers. Never round up, never drop items.
+    - If there is NO real run: do not invent anything. Write docs/measured-number.md explaining exactly how a human produces the number (`npm run eval` with GEMINI_API_KEY set, about how long it takes, where the three numbers appear in eval/report.md, and which three placeholders to replace in docs/devpost.md and docs/pitch.md). Leave the placeholders in place and add a visible line at the top of docs/devpost.md: "BEFORE SUBMITTING: fill {N}, {X}, {Y} from eval/report.md (see docs/measured-number.md)."
+    Either way the wording about the method must be true: a ~200-item reference list, a held-out set that is not on the list, variants A (Gemini alone), B (list + Gemini), C (list + Gemini + Google Search grounding), temperature 0.
+  lease:
+  - docs/measured-number.md
+  - docs/devpost.md
+  - docs/pitch.md
+  depends_on:
+  - T10
+  - T34
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && node scripts/check-docs.mjs measured
+  - npm install --no-audit --no-fund --silent && node scripts/check-docs.mjs devpost
+  priority: must
+- id: T37
+  title: Model-written item quips (Gemini) with safety filters
+  lane: host-script-and-personality-pr
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Optional polish (§12.1, task A6 in §15.3). Write src/ai/host/persona.ts (the personality prompt of §12.1 as a constant) and src/ai/host/quips.ts: `createQuipper(gemini): (itemName, ownerName) => Promise<string | null>` using GeminiClient.text with the persona as the system prompt and the quip request of §12.1, timeout 1.5 s. Reject (return null) any output over 18 words, or containing a digit, a "$", an emoji, a hashtag, or any word from a small unkind-words blocklist; strip surrounding quotes. Null when Gemini is unavailable. Then pass it to createHost({ quip }) inside src/ai/index.ts (a small change) so HostPort.quip works. The engine does not have to use it yet.
+    Tests (test/quips.test.ts) with a fake GeminiClient: 20 canned good outputs pass; outputs with digits, "$", 19 words, emoji or a blocked word return null; timeout returns null; unavailable Gemini makes zero calls.
+  lease:
+  - src/ai/host/persona.ts
+  - src/ai/host/quips.ts
+  - src/ai/index.ts
+  - test/quips.test.ts
+  depends_on:
+  - T27
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/quips.test.ts test/variants.test.ts
+  priority: nice
+- id: T38
+  title: Camera item identification with Gemini vision
+  lane: ai-and-vision
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Optional (§10.5, §21.3, task A4 in §15.3). Write src/ai/identify.ts: `createIdentifier(gemini): (jpegs: Buffer[]) => Promise<{ label: string; confidence: number } | null>` using GeminiClient.json with imagesJpeg (max 3 frames), the instruction text of §10.5 step 3 and a zod schema { label, confidence, notHolding }, timeout 4 s. Return null when notHolding, confidence < 0.5, no frames, Gemini unavailable or any failure. Frames stay in memory: never write them to disk, never log them or their base64. Then pass it as the `identify` option of createPricing inside src/ai/index.ts so PricingPort.identifyFromFrames works, only when env has a Gemini key.
+    Tests (test/identify.test.ts) with a fake GeminiClient: a good label passes through; notHolding and low confidence give null; more than 3 frames are cut to 3; failure gives null; the module does not import node:fs.
+  lease:
+  - src/ai/identify.ts
+  - src/ai/index.ts
+  - test/identify.test.ts
+  depends_on:
+  - T37
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/identify.test.ts test/variants.test.ts
+  priority: nice
+- id: T39
+  title: 'Engine: camera and voice fallbacks when no item text arrives'
+  lane: engine
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Optional (§7.4 state 7 branches c and d, §10.5). Extend the reducer (after T08) so that in item_resolve with NO item text from the owner: SPEAK item.camera {owner}, emit IDENTIFY_FROM_CAMERA {itemId, ownerId} and wait up to itemWaitMs for FRAME_ID_READY. A label with confidence >= 0.5 -> PRICE_ITEM with origin 'camera' and rawText = label. Otherwise SPEAK item.ask, LISTEN on, and take the first SPEECH_FINAL within 8 s as the raw text (origin 'voice') -> PRICE_ITEM. Still nothing priced at itemResolveMaxMs (12 s from entering item_resolve) -> prop closet as before. A late item text from the owner during this window is used at once. Reply MSG.itemTooLate to an item text that arrives after the owner's round has moved past item_resolve. All earlier engine tests must stay green.
+    Tests (test/engine.items.test.ts): text missing -> camera label -> priced with origin camera; camera null -> voice answer -> priced with origin voice; nothing -> prop closet by 12 s; late text is acknowledged with the too-late message.
+  lease:
+  - src/engine/reducer.ts
+  - src/engine/reducer/**
+  - test/engine.items.test.ts
+  depends_on:
+  - T08
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/engine.items.test.ts test/engine.reducer.test.ts test/engine.clock.test.ts
+  priority: nice
+- id: T40
+  title: Caller camera frames from facetime-remote-video
+  lane: calls
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Optional (§10.5 step 2, task D7 in §15.2; caller capture is UNVERIFIED on our line). Add src/comms/frames.ts: a `createFrameGrabber()` that keeps only the newest RGBA video frame given to it (with its timestamp) and `grab(max, gapMs = 400)` returns up to `max` JPEG buffers taken about gapMs apart, each resized to 768 px wide at quality 70 using `@napi-rs/canvas`; returns null when there is no frame newer than 2 s (never treat an old frame as current). Frames are never written to disk or logged. Then, in src/comms/livekit.ts, subscribe to the remote video track (prefer the one named `facetime-remote-video`) with a VideoStream, convert frames to RGBA and feed the grabber (at most 5 per second), handling mute, missing and replaced tracks; and make CallPort.latestCallerFrames in src/comms/call.ts return grabber.grab(max). Existing comms tests must stay green.
+    Tests (test/frames.test.ts): synthetic RGBA frames produce JPEGs (first bytes FF D8) 768 px wide; stale frames give null; max is respected; the module does not import node:fs.
+  lease:
+  - src/comms/frames.ts
+  - src/comms/livekit.ts
+  - src/comms/call.ts
+  - test/frames.test.ts
+  depends_on:
+  - T21
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npx vitest run test/frames.test.ts test/call.test.ts test/livekit.test.ts
+  priority: nice
+- id: T41
+  title: Atlas seed script and show-off aggregations
+  lane: store
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Optional but good evidence for the MongoDB Atlas track (§21.4, task Z11 in §15.4).
+    - src/store/seed.ts (`npm run seed`): upserts data/reference-items.json into `reference_items` (unique id), creates the indexes of docs/DATA_MODEL.md section 5 for all collections (including the 30-day TTL on price_cache), prints counts. Exits 1 with a clear message when MONGODB_URI is missing. No embeddings and no vector index (not built): say so in the output.
+    - scripts/atlas-stats.ts (`npm run atlas:stats`): aggregation pipelines printed as small tables: average points per round and per player; share of prices from list, web and estimate (rounds.item.source); the trickiest items (highest stumpPoints); lifetime leaderboard from players; pricing error by variant from eval_runs. Export each pipeline as a plain object builder so tests can check its shape; `--dry` prints the pipelines as JSON without connecting.
+    Tests (test/atlasStats.test.ts): each pipeline builder returns a non-empty array of stages with the expected $group keys; seed's document mapping (a pure exported function) keeps cents as integers and drops unknown fields.
+  lease:
+  - src/store/seed.ts
+  - scripts/atlas-stats.ts
+  - test/atlasStats.test.ts
+  depends_on:
+  - T07
+  - T05
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run atlas:stats -- --dry
+  - npm install --no-audit --no-fund --silent && npx vitest run test/atlasStats.test.ts
+  priority: nice
+- id: T42
+  title: Smoke scripts for the real line (for humans)
+  lane: comms
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Optional helpers the humans run with real keys and team phones (§15.2 "one-command smoke test per module"). Each script loads env with loadEnv(process.env, { readDotenv: true }), prints what it is about to do, refuses to run without the needed keys (exit 1 naming the missing variable), and prints usage and exits 0 for `--help` BEFORE checking any key. Phone numbers come ONLY from command-line arguments, never from code.
+    - scripts/smoke-imessage.ts: prints new inbound messages for 60 s (last 4 digits only); `--reply` answers each with "smoke test ok".
+    - scripts/smoke-voice.ts: synthesizes one host line through createTts and writes out/smoke-voice.wav (24 kHz mono WAV header + PCM) and prints tts.stats(); `--sfx` also writes each synthesized sound effect to out/sfx-{name}.wav (this part needs no key).
+    - scripts/smoke-stt.ts: sends a WAV file given as an argument to the STT provider and prints the transcripts.
+    - scripts/smoke-call.ts: `--to +1...` (repeatable) dials through createCallPort, waits for 'ready', says one line through createVoice, shows a test stage through createStage for 20 s, then ends the call. Prints a reminder to log the call in docs/call-log.md (trial: 5 minutes per call, 50 minutes total).
+    Acceptance only checks that each script type-checks and prints its help without keys.
+  lease:
+  - scripts/smoke-imessage.ts
+  - scripts/smoke-voice.ts
+  - scripts/smoke-stt.ts
+  - scripts/smoke-call.ts
+  depends_on:
+  - T21
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run smoke:voice -- --help
+  - npm install --no-audit --no-fund --silent && npm run smoke:call -- --help
+  - npm install --no-audit --no-fund --silent && npm run smoke:imessage -- --help
+  - npm install --no-audit --no-fund --silent && npm run smoke:stt -- --help
+  - npm install --no-audit --no-fund --silent && npm run typecheck
+  priority: nice
+- id: T43
+  title: Dockerfile for the backup deployment
+  lane: deployment
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Optional (§8.2 "Where it runs", task Z9 in §15.4). Add a Dockerfile (node:22-bookworm-slim, `npm ci`, copy the repo, `CMD ["npm","start"]`, non-root user, no secrets baked in: env comes from docker's env-file option at run time), a .dockerignore (node_modules, out, .cache, .git, .relay, local env files) and a "Docker" section appended to docs/runbook.md with the build and run commands and the note that the `chert` CLI steps still run on the host. Do not try to run Docker in acceptance.
+  lease:
+  - Dockerfile
+  - .dockerignore
+  - docs/runbook.md
+  depends_on:
+  - T11
+  - T21
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && node scripts/check-docs.mjs docker
+  priority: nice
+- id: T44
+  title: Animation preview frames for the demo video
+  lane: host-avatar-and-stage-video
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    Optional (task E3 in §15.1 "preview:anim"). Write scripts/preview-anim.ts (`npm run preview:anim`): using createRenderer from src/stage/render.ts and the fixtures, write a 15-frame PNG sequence for each animation into out/anim/{name}/{00..14}.png: countdown (10 to 0), drumroll, price pop (also with "$1,000.00" and "$0.99"), estimate stamp, score fly, finale confetti, and mouth flap (a sine mouth level). Print the folder list at the end. Look at the frames; other files are outside your lease, so list anything that looks wrong in the script's output under "LOOKS WRONG:" and report it as a blocker note.
+  lease:
+  - scripts/preview-anim.ts
+  depends_on:
+  - T33
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run preview:anim
+  priority: nice
+- id: T45
+  title: 'End-to-end demo check: the 2-minute demo game, offline'
+  lane: demo
+  brief: |
+    Project: The Price Is Live, a group FaceTime price-guessing game show with an AI host (TypeScript, Node 22, one process, no web server).
+    Read first: docs/API.md, docs/DATA_MODEL.md and src/contracts/*.ts (the law between lanes). Full spec: docs/SPEC.md; "§" numbers below point into it.
+    Rules for every task: run `npm install` first. Change ONLY the files in your lease. Never edit src/contracts/**, src/config.ts, src/testing/fakes.ts, src/stage/theme.ts, fixtures/**, scripts/check-docs.mjs, scripts/scan-secrets.mjs, package.json, docs/API.md or docs/DATA_MODEL.md (request a contract change and keep going; do not add npm packages). Keep the exported names and signatures given in docs/API.md section 5. Tests live in test/ and must run offline: no network, no API keys, no phone, no long real timers (inject fake fetch / WebSocket / SDK / clock). No secrets and no real phone numbers in any file (fake phones are +1214555010x). Never call, text, post or publish anything outside the repo. If something needs a real call, a real key or a human, do not stop: build it with a fallback and add a line under "TO VERIFY ON THE REAL LINE" in your module's header comment. Plain code, small functions, comments in everyday English. You are done when your acceptance commands and `npm run check` all pass.
+
+    YOUR TASK
+    The last gate. Prove the whole product works together without a phone (§14, §17.4), and hand the humans a checklist for the real demo.
+    1. scripts/demo-check.ts (`npm run demo:check`): play the demo game of §14.3 through the REAL pieces: the real reducer, runner and buildStageState; real host lines (createHost), real parseGuess and spokenAmount; real pricing from createAi with an empty Gemini key and the real data/reference-items.json (round 1 item "Owala bottle" must come from the price list; round 2 item is one that is NOT on the list and must come back as a labelled estimate without crashing); the real stage renderer (createStage / createRenderer) writing one PNG per phase seen to out/demo/; the real store in local mode; fake call, voice and message ports from src/testing/fakes.ts under a VirtualScheduler. Reuse playScriptedGame from src/engine/simGame.ts. Four players (Ethan, Diego, Akshi, Aditri with the fixture phones), demo mode on, spoken guesses as words ("thirty dollars", "twenty five bucks", "twelve ninety nine"), one texted guess, confirm with "yes".
+       It must assert, and exit 1 with a clear message on any failure: the game reaches finale and returns to wait_call; exactly 2 rounds; virtual time from call ready to end <= 120,000 ms; every player received the results card and it lists both items with prices; final totals equal an independent recomputation with scoreRound; the item name and price never appear in any StageState before the reveal price stage; every SPEAK text is free of leftover braces; at least one PNG per phase seen was written and is non-empty; then a REMATCH text dials all four phones again. Print a short timeline (virtual time, phase, host line) and "DEMO CHECK PASSED".
+    2. test/demo.e2e.test.ts runs the same check in-process (export a `runDemoCheck()` function from the script; the script only runs it when executed directly).
+    3. docs/demo-checklist.md for the humans: the pre-demo checklist of §14.2 as numbered steps with the exact commands (`npm run doctor`, `npm run warm:tts -- Ethan Diego Akshi Aditri`, `npm start`), the timed script of §14.3, what to do if audio is silent (TEXT MODE: text the guesses), if the call will not connect, if a phone is not verified, the backup plan (the PNGs in out/demo or a recorded run), and a rehearsal log table to fill in (run, duration, results text on all 4 phones, notes).
+    If the check exposes a bug in another lane's file, do not edit that file: report it as a blocker with the failing output, and keep the check itself correct (never weaken an assertion to make it pass).
+  lease:
+  - scripts/demo-check.ts
+  - test/demo.e2e.test.ts
+  - docs/demo-checklist.md
+  depends_on:
+  - T01
+  - T02
+  - T03
+  - T04
+  - T05
+  - T06
+  - T07
+  - T08
+  - T09
+  - T10
+  - T11
+  - T12
+  - T13
+  - T14
+  - T15
+  - T16
+  - T17
+  - T18
+  - T19
+  - T20
+  - T21
+  - T22
+  - T23
+  - T24
+  - T25
+  - T26
+  - T27
+  - T28
+  - T29
+  - T30
+  - T31
+  - T32
+  - T33
+  - T34
+  - T35
+  - T36
+  contracts:
+  - docs/API.md
+  - docs/DATA_MODEL.md
+  acceptance:
+  - npm install --no-audit --no-fund --silent && npm run demo:check
+  - npm install --no-audit --no-fund --silent && npx vitest run test/demo.e2e.test.ts
+  - npm install --no-audit --no-fund --silent && npm run check
+  - npm install --no-audit --no-fund --silent && npm run scan:secrets
+  priority: must

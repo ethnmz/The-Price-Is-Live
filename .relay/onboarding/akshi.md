@@ -26,6 +26,16 @@ You are setting up this computer so **Akshi** can take part in the team's **Rela
 
 Akshi's role: **ai-and-vision, item-identification-and-pricin, host-script-and-personality-pr, ai**. The team lead is **Ethan Meza**. The project repo is **https://github.com/ethnmz/The-Price-Is-Live**.
 
+Tasks in this role (their agent builds these during the run):
+- T22: Host line bank and HostPort.line
+- T23: Item text cleaning and reference-list matching
+- T24: Gemini client wrapper and price estimate
+- T25: Web price lookup with Gemini Google Search grounding
+- T26: Pricing pipeline: PricingPort.price
+- T27: AI wiring: createAi and the A/B/C eval variants
+- T37: Model-written item quips (Gemini) with safety filters
+- T38: Camera item identification with Gemini vision
+
 ### Step 1: Check the basic tools
 Run each command and check the result:
 - `node --version` must be **v20 or newer**. If missing or older: winget install OpenJS.NodeJS.LTS

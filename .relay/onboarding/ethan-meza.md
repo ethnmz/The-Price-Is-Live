@@ -26,6 +26,19 @@ You are setting up this computer so **Ethan Meza** can take part in the team's *
 
 Ethan Meza's role: **lead-design, host-avatar-and-stage-video, overlays, captions, demo, devpost, pitch, and-the-measured-number-write-, stage**. The team lead is **Ethan Meza**. The project repo is **https://github.com/ethnmz/The-Price-Is-Live**.
 
+Tasks in this role (their agent builds these during the run):
+- T28: Stage core: background, marquee, HUD and podiums
+- T29: Host sprite (Chip Dollar) with mouth flap
+- T30: Captions: wrap, fit and word-by-word reveal
+- T31: Overlays: countdown ring, drumroll and price pop
+- T32: Score fly and finale scoreboard
+- T33: Compose the renderer, StagePort and the preview script
+- T34: Devpost and pitch drafts
+- T35: README with one section per sponsor
+- T36: Measured-number writeup
+- T44: Animation preview frames for the demo video
+- T45: End-to-end demo check: the 2-minute demo game, offline
+
 ### Step 1: Check the basic tools
 Run each command and check the result:
 - `node --version` must be **v20 or newer**. If missing or older: brew install node   (or the installer from nodejs.org if Homebrew is missing)
