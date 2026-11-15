@@ -12,7 +12,7 @@ import { last4 } from '../../contracts/money';
 import type { GameConfig, GameState, Player, PlayerId, PriceResult } from '../../contracts/types';
 
 export type TimerKind =
-  | 'dial' | 'lobbysettle' | 'lobbymax' | 'price' | 'itemwait' | 'show' | 'guess' | 'confirm'
+  | 'dial' | 'lobbysettle' | 'lobbymax' | 'price' | 'itemwait' | 'itemmax' | 'show' | 'guess' | 'confirm'
   | 'drumroll' | 'revealhold' | 'scorehold' | 'rematch';
 
 /** What to do when the host has finished the lines that are queued right now. */
@@ -38,6 +38,7 @@ export interface EnginePrivate {
   earlyPrices: Record<string, PriceResult>;
   earlyFailed: Record<string, true>;
   finishedRoster: boolean; // a game was played with this roster, so "rematch" works
+  itemStage: 'none' | 'camera' | 'voice' | 'done'; // how far the no-item-text fallback has got this round
   windowSpeechSeen: boolean; // any speech arrived in the current guess window (for auto TEXT MODE)
 }
 
@@ -47,7 +48,7 @@ export function freshPrivate(): EnginePrivate {
   return {
     bootAt: 0, speakQueue: [], speakingId: null, afterSpeech: null, speakSeq: 0, timerSeq: 0, textSeq: 0,
     timers: {}, listenOpen: false, dialAttempts: 0, nudged: false, guessCorrected: false, listenLeftMs: 0,
-    earlyPrices: {}, earlyFailed: {}, finishedRoster: false, windowSpeechSeen: false,
+    earlyPrices: {}, earlyFailed: {}, finishedRoster: false, itemStage: 'none', windowSpeechSeen: false,
   };
 }
 

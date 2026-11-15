@@ -718,12 +718,17 @@ describe('items and pricing', () => {
     expect(sim.s.phase).toBe('show_item');
   });
 
-  it('no item text at all: waits itemWaitMs, then the prop closet', () => {
+  it('no item text at all: camera first, voice after itemWaitMs, prop closet only at the 12 s deadline', () => {
     const sim = withPlayers([A, B]);
     connect(sim);
     expect(sim.s.phase).toBe('item_resolve');
+    expect(sim.keys()).toContain('item.camera');
     expect(sim.timers.get(sim.timerId('itemwait') as string)).toBe(6000);
     sim.fire('itemwait');
+    expect(sim.keys()).toContain('item.ask');
+    expect(sim.keys()).not.toContain('item.propcloset');
+    expect(sim.s.phase).toBe('item_resolve');
+    sim.fire('itemmax');
     expect(sim.keys()).toContain('item.propcloset');
     expect(sim.s.phase).toBe('show_item');
   });
