@@ -1,9 +1,9 @@
 // Static stage look (cached) plus the marquee sign with blinking bulbs. Pure: (ctx, nowMs) -> pixels.
 import { createCanvas, type Canvas, type SKRSContext2D } from '@napi-rs/canvas';
-import { COLORS, FONTS, LAYOUT, STAGE, theme, type ThemeName } from './theme';
+import { COLORS, FONTS, LAYOUT, STAGE, applyShape, shape, theme, type StageShape, type ThemeName } from './theme';
 import { registerFonts } from './fonts';
 
-let cache: { theme: ThemeName; canvas: Canvas } | null = null;
+let cache: { theme: ThemeName; shape: StageShape; canvas: Canvas } | null = null;
 
 function paintStatic(): Canvas {
   const c = createCanvas(STAGE.w, STAGE.h);
@@ -638,14 +638,52 @@ function drawPlaque(ctx: SKRSContext2D): void {
   ctx.fillText('THE PRICE IS LIVE', m.x + m.w / 2, m.y + m.h / 2 + 2, m.w - 80);
 }
 
+/** How far the wide scene moves sideways so its centre (x 480) sits behind the host. */
+function sceneShiftX(): number {
+  return shape() === 'wide' ? 0 : LAYOUT.host.x + LAYOUT.host.w / 2 - 480;
+}
+
+/**
+ * The scene art is drawn for the wide 960x540 frame. For the square frame it is painted wide,
+ * shifted so its centre sits behind the host, and its floor is carried down to the bottom edge.
+ */
+function paintScene(t: ThemeName, sh: StageShape): Canvas {
+  const paint = () => (t === 'odyssey' ? paintOdyssey() : paintStatic());
+  if (sh === 'wide') return paint();
+  const shiftX = sceneShiftX();
+  applyShape('wide');
+  let wide: Canvas;
+  try {
+    wide = paint();
+  } finally {
+    applyShape(sh);
+  }
+  const c = createCanvas(STAGE.w, STAGE.h);
+  const g = c.getContext('2d');
+  g.drawImage(wide, shiftX, 0);
+  // below y 540: repeat the bottom band of the floor, darkening towards the bottom edge
+  for (let y = 540; y < STAGE.h; y += 60) g.drawImage(wide, 0, 480, 960, 60, shiftX, y, 960, 60);
+  const fade = g.createLinearGradient(0, 520, 0, STAGE.h);
+  fade.addColorStop(0, 'rgba(6,16,28,0)');
+  fade.addColorStop(1, 'rgba(6,16,28,0.45)');
+  g.fillStyle = fade;
+  g.fillRect(0, 520, STAGE.w, STAGE.h - 520);
+  return c;
+}
+
 export function drawBackground(ctx: SKRSContext2D, nowMs: number): void {
   registerFonts();
   const t = theme();
-  if (!cache || cache.theme !== t) cache = { theme: t, canvas: t === 'odyssey' ? paintOdyssey() : paintStatic() };
+  const sh = shape();
+  if (!cache || cache.theme !== t || cache.shape !== sh) cache = { theme: t, shape: sh, canvas: paintScene(t, sh) };
   ctx.save();
   ctx.drawImage(cache.canvas, 0, 0);
   if (t === 'odyssey') {
+    // the scene's moving parts are placed for the wide frame; shift them with the scene
+    ctx.save();
+    ctx.translate(sceneShiftX(), 0);
     drawOdysseyMotion(ctx, nowMs);
+    ctx.restore();
     drawPlaque(ctx);
   } else drawMarquee(ctx, nowMs);
   ctx.restore();

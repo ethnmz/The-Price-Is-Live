@@ -283,7 +283,7 @@ export function grain(ctx: Ctx, b: Box, strength: number, offset = 0): void {
 }
 
 function vignette(): Canvas {
-  if (vignetteCanvas) return vignetteCanvas;
+  if (vignetteCanvas && vignetteCanvas.width === STAGE.w && vignetteCanvas.height === STAGE.h) return vignetteCanvas;
   const c = createCanvas(STAGE.w, STAGE.h);
   const g = c.getContext('2d');
   const v = g.createRadialGradient(STAGE.w / 2, STAGE.h * 0.45, STAGE.h * 0.35, STAGE.w / 2, STAGE.h * 0.5, STAGE.w * 0.62);

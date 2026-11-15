@@ -4,7 +4,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { allStageFixtures, stressStageFixture, stageFixture } from '../fixtures/stage-states';
 import { createRenderer } from '../src/stage/render';
 
-const r = createRenderer({ width: 960, height: 540 });
+// STAGE_W / STAGE_H pick the frame (e.g. 720 x 720 for the square FaceTime layout).
+const r = createRenderer({ width: Number(process.env.STAGE_W ?? 960), height: Number(process.env.STAGE_H ?? 540) });
 mkdirSync('out/stage', { recursive: true });
 for (const f of allStageFixtures()) writeFileSync(`out/stage/${f.name}.png`, r.png(f.state));
 writeFileSync('out/stage/stress.png', r.png(stressStageFixture()));

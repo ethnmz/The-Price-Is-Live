@@ -1,5 +1,5 @@
 // Stage palette, fonts and layout boxes (docs/SPEC.md 13.1 and 13.2). FROZEN (planner-owned) so the
-// stage tasks that run in parallel all draw into the same boxes. Landscape 960x540.
+// stage tasks that run in parallel all draw into the same boxes. Landscape 960x540 or square 720x720.
 import type { PlayerId } from '../contracts/types';
 
 export const COLORS = {
@@ -74,25 +74,72 @@ export function applyTheme(name: string | undefined): ThemeName {
 
 export interface Box { x: number; y: number; w: number; h: number }
 
-export const STAGE = { w: 960, h: 540, safeX: 48, safeY: 27 };
+// Two frame shapes. 'wide' is the original 960x540. 'square' (720x720) is for group FaceTime,
+// which crops each caller's video to a square tile, so nothing may sit outside the box.
+export type StageShape = 'wide' | 'square';
 
-export const LAYOUT: Record<string, Box> = {
-  marquee: { x: 280, y: 10, w: 400, h: 50 },
-  roundLabel: { x: 40, y: 18, w: 220, h: 34 },
-  callClock: { x: 700, y: 18, w: 220, h: 34 },
-  turnStrip: { x: 180, y: 62, w: 600, h: 36 },
-  joinHint: { x: 130, y: 104, w: 700, h: 44 },
-  host: { x: 330, y: 100, w: 300, h: 250 },
-  mysteryCard: { x: 40, y: 120, w: 250, h: 190 },
-  timerRing: { x: 680, y: 120, w: 240, h: 190 },
-  caption: { x: 60, y: 360, w: 840, h: 70 },
-  // Sits just above the caption so the two never overlap (they used to share y 400-430).
-  banner: { x: 150, y: 312, w: 660, h: 40 },
-  badge: { x: 780, y: 60, w: 160, h: 28 },
-  podiums: { x: 48, y: 440, w: 864, h: 100 },
+const WIDE = {
+  stage: { w: 960, h: 540, safeX: 48, safeY: 27 },
+  podiumW: 190,
+  layout: {
+    marquee: { x: 280, y: 10, w: 400, h: 50 },
+    roundLabel: { x: 40, y: 18, w: 220, h: 34 },
+    callClock: { x: 700, y: 18, w: 220, h: 34 },
+    turnStrip: { x: 180, y: 62, w: 600, h: 36 },
+    joinHint: { x: 130, y: 104, w: 700, h: 44 },
+    host: { x: 330, y: 100, w: 300, h: 250 },
+    mysteryCard: { x: 40, y: 120, w: 250, h: 190 },
+    timerRing: { x: 680, y: 120, w: 240, h: 190 },
+    caption: { x: 60, y: 360, w: 840, h: 70 },
+    // Sits just above the caption so the two never overlap (they used to share y 400-430).
+    banner: { x: 150, y: 312, w: 660, h: 40 },
+    badge: { x: 780, y: 60, w: 160, h: 28 },
+    podiums: { x: 48, y: 440, w: 864, h: 100 },
+  } as Record<string, Box>,
 };
 
-export const PODIUM_W = 190;
+// Square: the host keeps his y (his drawing uses fixed heights), the card and timer flank him,
+// and the extra height goes to the caption and the podium row below.
+const SQUARE = {
+  stage: { w: 720, h: 720, safeX: 24, safeY: 24 },
+  podiumW: 158,
+  layout: {
+    marquee: { x: 170, y: 10, w: 380, h: 50 },
+    roundLabel: { x: 16, y: 18, w: 148, h: 34 },
+    callClock: { x: 556, y: 18, w: 148, h: 34 },
+    turnStrip: { x: 60, y: 64, w: 600, h: 36 },
+    joinHint: { x: 24, y: 104, w: 672, h: 44 },
+    host: { x: 210, y: 100, w: 300, h: 250 },
+    mysteryCard: { x: 14, y: 150, w: 190, h: 190 },
+    timerRing: { x: 516, y: 150, w: 190, h: 190 },
+    caption: { x: 24, y: 452, w: 672, h: 84 },
+    banner: { x: 90, y: 312, w: 540, h: 40 },
+    badge: { x: 556, y: 108, w: 148, h: 28 },
+    podiums: { x: 24, y: 588, w: 672, h: 100 },
+  } as Record<string, Box>,
+};
+
+export const STAGE = { ...WIDE.stage };
+export const LAYOUT: Record<string, Box> = structuredClone(WIDE.layout);
+export let PODIUM_W = WIDE.podiumW;
+let currentShape: StageShape = 'wide';
+
+export function shape(): StageShape {
+  return currentShape;
+}
+
+/** Switch the frame shape. Anything that is not 'square' is 'wide'. */
+export function applyShape(name: string | undefined): StageShape {
+  const sh: StageShape = name === 'square' ? 'square' : 'wide';
+  const src = sh === 'square' ? SQUARE : WIDE;
+  Object.assign(STAGE, src.stage);
+  for (const k of Object.keys(LAYOUT)) delete LAYOUT[k];
+  Object.assign(LAYOUT, structuredClone(src.layout));
+  PODIUM_W = src.podiumW;
+  currentShape = sh;
+  return sh;
+}
+
 export const CAPTION = { fontPx: 28, maxLines: 2, tagPx: 18, holdMs: 1500 };
 
 /** Left x of each podium for 2, 3 or 4 players: equal spacing across the podium row. */

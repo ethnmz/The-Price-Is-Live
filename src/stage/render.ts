@@ -5,7 +5,7 @@
 import { createCanvas, type Canvas, type SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
 import { registerFonts } from './fonts';
-import { STAGE, applyTheme } from './theme';
+import { STAGE, applyShape, applyTheme } from './theme';
 import { drawBackground } from './background';
 import { drawHud, drawBanner, drawJoinHint } from './hud';
 import { drawHost, type HostPose } from './host-sprite';
@@ -30,6 +30,11 @@ export interface RendererOpts {
   height: number;
   /** Stage look: 'classic' (default) or 'odyssey'. Defaults to the STAGE_THEME environment variable. */
   theme?: string;
+  /**
+   * Frame shape: 'wide' (960x540) or 'square' (720x720, for group FaceTime tiles). Defaults to the
+   * STAGE_SHAPE environment variable, else 'square' when the output is roughly square, else 'wide'.
+   */
+  shape?: string;
   /** Tests only: make this layer throw. */
   failLayer?: LayerName;
   log?: (msg: string) => void;
@@ -51,6 +56,7 @@ function timerKey(t: StageState['timer']): string {
 
 export function createRenderer(opts: RendererOpts): Renderer {
   applyTheme(opts.theme ?? process.env.STAGE_THEME);
+  applyShape(opts.shape ?? process.env.STAGE_SHAPE ?? (opts.width / opts.height < 1.25 ? 'square' : 'wide'));
   registerFonts();
   const { width, height } = opts;
   const log = opts.log ?? ((m: string) => console.warn(m));

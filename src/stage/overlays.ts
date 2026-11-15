@@ -14,12 +14,12 @@ const RING_R = 80;
 const RING_W = 14;
 const RED_AT = 4;
 const POP_MS = 500;
-const SAFE_W = STAGE.w - 2 * STAGE.safeX; // 864
+const safeW = (): number => STAGE.w - 2 * STAGE.safeX; // 864 wide, 672 square
 const PRICE_CY = 228;
 const NAME_Y = 316;
 const SOURCE_Y = 350;
 /** The price pops to 1.25x; size it so even the peak stays inside the safe area. */
-const PRICE_MAX_W = Math.floor(SAFE_W / 1.25);
+const priceMaxW = (): number => Math.floor(safeW() / 1.25);
 
 /** Seconds left now (a fraction), clamped at 0. Counts down only while the timer is running. */
 export function timerSecondsLeft(timer: Timer, msSinceSet: number): number {
@@ -192,7 +192,7 @@ function drawDrumroll(ctx: SKRSContext2D, ms: number, lightning: boolean): void 
   const digits = [0, 1, 2, 3].map((i) => slotDigit(ms, i));
   const s = `$ ${digits[0]}${digits[1]} . ${digits[2]}${digits[3]}`;
   ctx.save();
-  ctx.font = `${fitFontPx(ctx, s, FONTS.title, 130, SAFE_W)}px ${FONTS.title}`;
+  ctx.font = `${fitFontPx(ctx, s, FONTS.title, 130, safeW())}px ${FONTS.title}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round';
@@ -208,7 +208,7 @@ interface Rect { x: number; y: number; w: number; h: number }
 
 /** The rectangle the price digits occupy once fully popped (measured with the fitted font). */
 export function priceTextBox(ctx: SKRSContext2D, reveal: Pick<Reveal, 'priceText'>): Rect {
-  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, PRICE_MAX_W);
+  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, priceMaxW());
   ctx.save();
   ctx.font = `${px}px ${FONTS.title}`;
   const w = ctx.measureText(reveal.priceText).width;
@@ -217,11 +217,12 @@ export function priceTextBox(ctx: SKRSContext2D, reveal: Pick<Reveal, 'priceText
   return { x: STAGE.w / 2 - w / 2, y: PRICE_CY - h / 2, w, h };
 }
 
-const STAMP = { cx: 770, cy: 118, w: 200, h: 46, angle: (-8 * Math.PI) / 180 };
+// above-right of the price, inside the safe area (cx 770 in the wide frame)
+const stamp = () => ({ cx: STAGE.w - STAGE.safeX - 142, cy: 118, w: 200, h: 46, angle: (-8 * Math.PI) / 180 });
 
 /** Bounding box of the (rotated) ESTIMATE stamp. It sits above-right of the price. */
 export function estimateStampBox(): Rect {
-  const { cx, cy, w, h, angle } = STAMP;
+  const { cx, cy, w, h, angle } = stamp();
   const bw = Math.abs(w * Math.cos(angle)) + Math.abs(h * Math.sin(angle));
   const bh = Math.abs(w * Math.sin(angle)) + Math.abs(h * Math.cos(angle));
   return { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh };
@@ -263,7 +264,7 @@ function ellipsize(ctx: SKRSContext2D, text: string, maxWidth: number): string {
 function drawPrice(ctx: SKRSContext2D, reveal: Reveal, ms: number): void {
   const scale = popScale(ms);
   const cx = STAGE.w / 2;
-  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, PRICE_MAX_W);
+  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, priceMaxW());
   ctx.save();
   ctx.translate(cx, PRICE_CY);
   ctx.scale(scale, scale);
@@ -309,7 +310,7 @@ function drawPrice(ctx: SKRSContext2D, reveal: Reveal, ms: number): void {
   ctx.textBaseline = 'middle';
   if (reveal.itemName) {
     ctx.font = `40px ${FONTS.body}`;
-    const name = ellipsize(ctx, reveal.itemName, SAFE_W);
+    const name = ellipsize(ctx, reveal.itemName, safeW());
     ctx.lineJoin = 'round';
     ctx.lineWidth = 6;
     ctx.strokeStyle = COLORS.ink;
@@ -320,7 +321,7 @@ function drawPrice(ctx: SKRSContext2D, reveal: Reveal, ms: number): void {
   if (reveal.sourceLabel) {
     // A dark pill keeps the source readable on top of the starburst.
     ctx.font = `22px ${FONTS.body}`;
-    const src = ellipsize(ctx, reveal.sourceLabel, SAFE_W - 40);
+    const src = ellipsize(ctx, reveal.sourceLabel, safeW() - 40);
     const w = ctx.measureText(src).width + 32;
     ctx.fillStyle = 'rgba(20,18,58,0.85)';
     ctx.beginPath();
@@ -335,7 +336,7 @@ function drawPrice(ctx: SKRSContext2D, reveal: Reveal, ms: number): void {
 }
 
 function drawStamp(ctx: SKRSContext2D, a: number): void {
-  const { cx, cy, w, h, angle } = STAMP;
+  const { cx, cy, w, h, angle } = stamp();
   ctx.save();
   ctx.globalAlpha = a;
   ctx.translate(cx, cy);

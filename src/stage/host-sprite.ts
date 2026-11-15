@@ -16,7 +16,7 @@ type Pt = [number, number];
 const SKIN = '#F2BE8C';
 const SKIN_SHADE = '#D4935E';
 const HAIR = '#3A2618';
-const CX = LAYOUT.host.x + LAYOUT.host.w / 2; // 480
+const CX = 480; // centre of the wide host box; drawHost shifts the figure for other layouts
 const HEAD_Y = 180;
 const HEAD_RX = 38;
 const HEAD_RY = 43;
@@ -696,9 +696,13 @@ function lectern(ctx: Ctx, nowMs: number): void {
 
 export function drawHost(ctx: Ctx, a: { pose: HostPose; mouth: MouthShape; nowMs: number }): void {
   const { pose, mouth, nowMs } = a;
-  const b = LAYOUT.host;
+  // The figure is drawn around x 480 (the wide host box); in the square frame the whole figure
+  // shifts sideways to the square host box, so `b` is the host box in drawing coordinates.
+  const dx = LAYOUT.host.x + LAYOUT.host.w / 2 - CX;
+  const b = { ...LAYOUT.host, x: LAYOUT.host.x - dx };
   const bob = pose === 'talking' ? Math.round(1 + Math.sin(nowMs / 120)) : 0; // 0..2 px
   ctx.save();
+  ctx.translate(dx, 0);
   // everything stays inside the host box (2 px margin)
   ctx.beginPath();
   ctx.rect(b.x + 2, b.y + 2, b.w - 4, b.h - 4);
