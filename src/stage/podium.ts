@@ -1,7 +1,7 @@
 // Podiums along the bottom row: seat-color body, name plate, score, guess chip, role decorations.
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
-import { COLORS, FONTS, LAYOUT, PODIUM_W, SEAT_COLORS, podiumXs, type Box } from './theme';
+import { COLORS, FONTS, LAYOUT, PODIUM_W, SEAT_COLORS, STAGE, podiumXs, type Box } from './theme';
 
 type Podium = StageState['podiums'][number];
 
@@ -98,7 +98,7 @@ function drawOne(ctx: SKRSContext2D, p: Podium, box: Box, nowMs: number, transcr
     ctx.stroke();
   }
   // name plate
-  const plate = { x: box.x + 10, y: box.y + 20, w: box.w - 20, h: 26 };
+  const plate = { x: box.x + 10, y: box.y + 19, w: box.w - 20, h: 26 };
   rr(ctx, plate.x, plate.y, plate.w, plate.h, 6);
   ctx.fillStyle = COLORS.ink;
   ctx.fill();
@@ -109,35 +109,37 @@ function drawOne(ctx: SKRSContext2D, p: Podium, box: Box, nowMs: number, transcr
   ctx.textBaseline = 'middle';
   ctx.fillText(p.name, plate.x + plate.w / 2, plate.y + plate.h / 2 + 1);
   // score
-  ctx.font = `24px ${FONTS.title}`;
+  ctx.font = `30px ${FONTS.title}`;
   ctx.fillStyle = '#fff';
-  ctx.fillText(String(p.score), box.x + box.w / 2, box.y + 62, box.w - 20);
+  ctx.fillText(String(p.score), box.x + box.w / 2, box.y + 61, box.w - 20);
   // guess chip
   const chip = chipStyle(p);
   if (chip) {
-    const c = { x: box.x + 30, y: box.y + 74, w: box.w - 60, h: 22 };
-    rr(ctx, c.x, c.y, c.w, c.h, 11);
+    const c = { x: box.x + 16, y: box.y + 76, w: box.w - 32, h: 24 };
+    rr(ctx, c.x, c.y, c.w, c.h, 12);
     ctx.fillStyle = chip.fill;
     ctx.fill();
-    ctx.font = `16px ${FONTS.body}`;
+    ctx.font = `20px ${FONTS.body}`;
     ctx.fillStyle = chip.color;
     ctx.fillText(chip.text, c.x + c.w / 2, c.y + c.h / 2 + 1, c.w - 8);
   }
   if (p.role === 'owner') {
-    const tag = { x: box.x + box.w - 62, y: box.y + 4, w: 56, h: 16 };
-    rr(ctx, tag.x, tag.y, tag.w, tag.h, 8);
+    const tag = { x: box.x + box.w - 84, y: box.y, w: 78, h: 20 };
+    rr(ctx, tag.x, tag.y, tag.w, tag.h, 10);
     ctx.fillStyle = COLORS.gold;
     ctx.fill();
-    ctx.font = `11px ${FONTS.title}`;
+    ctx.font = `14px ${FONTS.title}`;
     ctx.fillStyle = COLORS.ink;
     ctx.fillText('OWNER', tag.x + tag.w / 2, tag.y + tag.h / 2 + 1);
   }
   if (p.role === 'winner') drawCrown(ctx, box.x + box.w / 2, box.y - 12);
   if (transcript) {
-    ctx.font = `18px ${FONTS.body}`;
-    const w = Math.min(box.w + 40, ctx.measureText(transcript).width + 24);
-    const t = { x: box.x + box.w / 2 - w / 2, y: box.y - 34, w, h: 26 };
-    rr(ctx, t.x, t.y, t.w, t.h, 13);
+    // Above the caption bar (y 360-430), so the two never overlap.
+    ctx.font = `22px ${FONTS.body}`;
+    const w = Math.min(box.w + 60, ctx.measureText(transcript).width + 28);
+    const cx = Math.min(STAGE.w - STAGE.safeX - w / 2, Math.max(STAGE.safeX + w / 2, box.x + box.w / 2));
+    const t = { x: cx - w / 2, y: LAYOUT.caption.y - 38, w, h: 32 };
+    rr(ctx, t.x, t.y, t.w, t.h, 16);
     ctx.fillStyle = 'rgba(255,244,214,0.92)';
     ctx.fill();
     ctx.fillStyle = COLORS.ink;

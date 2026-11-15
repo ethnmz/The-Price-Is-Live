@@ -66,8 +66,8 @@ export function drawScoreFly(ctx: SKRSContext2D, s: StageState, msSincePhase: nu
 export const FINALE_BOXES: Record<'banner' | 'board' | 'items' | 'credit', Box> = {
   banner: { x: STAGE.safeX, y: 40, w: STAGE.w - 2 * STAGE.safeX, h: 64 },
   board: { x: 180, y: 118, w: 600, h: 270 },
-  items: { x: STAGE.safeX, y: 428, w: STAGE.w - 2 * STAGE.safeX, h: 30 },
-  credit: { x: STAGE.safeX, y: 486, w: STAGE.w - 2 * STAGE.safeX, h: 22 },
+  items: { x: STAGE.safeX, y: 408, w: STAGE.w - 2 * STAGE.safeX, h: 40 },
+  credit: { x: STAGE.safeX, y: 470, w: STAGE.w - 2 * STAGE.safeX, h: 30 },
 };
 export const CREDIT_POS = { x: STAGE.w / 2, y: FINALE_BOXES.credit.y + FINALE_BOXES.credit.h / 2 };
 
@@ -216,7 +216,7 @@ function drawItemsStrip(ctx: SKRSContext2D, s: StageState): void {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = COLORS.cream;
-  const text = fitText(ctx, items.join(' · '), FONTS.body, 18, 11, b.w - 30);
+  const text = fitText(ctx, items.join(' · '), FONTS.body, 22, 15, b.w - 36);
   ctx.fillText(text, b.x + b.w / 2, b.y + b.h / 2 + 1);
   ctx.restore();
 }
@@ -226,9 +226,14 @@ function drawCredit(ctx: SKRSContext2D): void {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const b = FINALE_BOXES.credit;
-  fitFont(ctx, CREDIT_LINE, FONTS.body, 14, 9, b.w);
-  ctx.fillStyle = COLORS.cream;
-  ctx.fillText(CREDIT_LINE, CREDIT_POS.x, CREDIT_POS.y);
+  fitFont(ctx, CREDIT_LINE, FONTS.body, 20, 12, b.w - 40);
+  const w = ctx.measureText(CREDIT_LINE).width + 36;
+  ctx.fillStyle = 'rgba(20,18,58,0.85)';
+  ctx.beginPath();
+  ctx.roundRect(CREDIT_POS.x - w / 2, b.y, w, b.h, b.h / 2);
+  ctx.fill();
+  ctx.fillStyle = COLORS.gold;
+  ctx.fillText(CREDIT_LINE, CREDIT_POS.x, CREDIT_POS.y + 1);
   ctx.restore();
 }
 
@@ -237,7 +242,7 @@ export function drawFinale(ctx: SKRSContext2D, s: StageState, msSincePhase: numb
   const ms = Math.max(0, msSincePhase);
   ctx.save();
   ctx.globalAlpha = 1;
-  ctx.fillStyle = `rgba(10,8,30,${0.72 * Math.min(1, ms / 300)})`;
+  ctx.fillStyle = `rgba(10,8,30,${0.82 * Math.min(1, ms / 300)})`;
   ctx.fillRect(0, 0, STAGE.w, STAGE.h);
   drawConfetti(ctx, ms);
   drawBanner(ctx, s);

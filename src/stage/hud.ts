@@ -31,7 +31,7 @@ function drawTurnStrip(ctx: SKRSContext2D, s: StageState): void {
   if (n === 0) return;
   const b = LAYOUT.turnStrip;
   const gap = 10;
-  const w = Math.min(130, (b.w - gap * (n - 1)) / n);
+  const w = Math.min(140, (b.w - gap * (n - 1)) / n);
   const total = n * w + (n - 1) * gap;
   let x = b.x + (b.w - total) / 2;
   for (const t of s.turnOrder) {
@@ -41,7 +41,7 @@ function drawTurnStrip(ctx: SKRSContext2D, s: StageState): void {
     pill(ctx, box, color, t.current ? COLORS.gold : undefined);
     if (t.current) { ctx.lineWidth = 3; ctx.strokeStyle = COLORS.gold; ctx.stroke(); }
     const label = t.done ? `✓ ${t.name}` : t.name;
-    text(ctx, label, box.x + box.w / 2, box.y + box.h / 2 + 1, `${t.current ? 16 : 14}px ${FONTS.body}`, '#fff', 'center', box.w - 16);
+    text(ctx, label, box.x + box.w / 2, box.y + box.h / 2 + 1, `${t.current ? 21 : 19}px ${FONTS.body}`, '#fff', 'center', box.w - 16);
     x += w + gap;
   }
 }
@@ -65,6 +65,19 @@ function drawMystery(ctx: SKRSContext2D, owner: string): void {
   text(ctx, `from ${owner}`, b.x + b.w / 2, b.y + 158, `22px ${FONTS.body}`, COLORS.ink, 'center', b.w - 20);
 }
 
+/** The gold banner ("CLOSEST WITHOUT GOING OVER WINS"). Drawn after the host so he never covers it. */
+export function drawBanner(ctx: SKRSContext2D, s: StageState): void {
+  if (!s.banner) return;
+  const b = LAYOUT.banner;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = 12;
+  pill(ctx, b, COLORS.gold, COLORS.cream);
+  ctx.shadowBlur = 0;
+  text(ctx, s.banner, b.x + b.w / 2, b.y + b.h / 2 + 1, `22px ${FONTS.title}`, COLORS.ink, 'center', b.w - 30);
+  ctx.restore();
+}
+
 export function drawHud(ctx: SKRSContext2D, s: StageState, nowMs: number): void {
   void nowMs;
   ctx.save();
@@ -82,14 +95,9 @@ export function drawHud(ctx: SKRSContext2D, s: StageState, nowMs: number): void 
   if (s.joinHint) {
     const b = LAYOUT.joinHint;
     pill(ctx, b, COLORS.cream, COLORS.gold);
-    text(ctx, s.joinHint, b.x + b.w / 2, b.y + b.h / 2 + 1, `20px ${FONTS.body}`, COLORS.ink, 'center', b.w - 30);
+    text(ctx, s.joinHint, b.x + b.w / 2, b.y + b.h / 2 + 1, `24px ${FONTS.body}`, COLORS.ink, 'center', b.w - 30);
   }
   if (s.mysteryOwner) drawMystery(ctx, s.mysteryOwner);
-  if (s.banner) {
-    const b = LAYOUT.banner;
-    pill(ctx, b, COLORS.gold);
-    text(ctx, s.banner, b.x + b.w / 2, b.y + b.h / 2 + 1, `20px ${FONTS.title}`, COLORS.ink, 'center', b.w - 30);
-  }
   if (s.fallbackBadge) {
     const b = LAYOUT.badge;
     pill(ctx, b, COLORS.alert, '#fff');

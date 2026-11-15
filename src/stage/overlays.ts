@@ -14,9 +14,11 @@ const RING_W = 14;
 const RED_AT = 4;
 const POP_MS = 500;
 const SAFE_W = STAGE.w - 2 * STAGE.safeX; // 864
-const PRICE_CY = 215;
-const NAME_Y = 305;
-const SOURCE_Y = 342;
+const PRICE_CY = 228;
+const NAME_Y = 316;
+const SOURCE_Y = 350;
+/** The price pops to 1.25x; size it so even the peak stays inside the safe area. */
+const PRICE_MAX_W = Math.floor(SAFE_W / 1.25);
 
 /** Seconds left now (a fraction), clamped at 0. Counts down only while the timer is running. */
 export function timerSecondsLeft(timer: Timer, msSinceSet: number): number {
@@ -182,7 +184,7 @@ interface Rect { x: number; y: number; w: number; h: number }
 
 /** The rectangle the price digits occupy once fully popped (measured with the fitted font). */
 export function priceTextBox(ctx: SKRSContext2D, reveal: Pick<Reveal, 'priceText'>): Rect {
-  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, SAFE_W);
+  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, PRICE_MAX_W);
   ctx.save();
   ctx.font = `${px}px ${FONTS.title}`;
   const w = ctx.measureText(reveal.priceText).width;
@@ -191,7 +193,7 @@ export function priceTextBox(ctx: SKRSContext2D, reveal: Pick<Reveal, 'priceText
   return { x: STAGE.w / 2 - w / 2, y: PRICE_CY - h / 2, w, h };
 }
 
-const STAMP = { cx: 770, cy: 108, w: 200, h: 46, angle: (-8 * Math.PI) / 180 };
+const STAMP = { cx: 770, cy: 118, w: 200, h: 46, angle: (-8 * Math.PI) / 180 };
 
 /** Bounding box of the (rotated) ESTIMATE stamp. It sits above-right of the price. */
 export function estimateStampBox(): Rect {
@@ -233,7 +235,7 @@ function ellipsize(ctx: SKRSContext2D, text: string, maxWidth: number): string {
 function drawPrice(ctx: SKRSContext2D, reveal: Reveal, ms: number): void {
   const scale = popScale(ms);
   const cx = STAGE.w / 2;
-  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, SAFE_W);
+  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, PRICE_MAX_W);
   ctx.save();
   ctx.translate(cx, PRICE_CY);
   ctx.scale(scale, scale);
@@ -266,13 +268,16 @@ function drawPrice(ctx: SKRSContext2D, reveal: Reveal, ms: number): void {
     ctx.fillText(name, cx, NAME_Y);
   }
   if (reveal.sourceLabel) {
-    ctx.font = `20px ${FONTS.body}`;
-    const src = ellipsize(ctx, reveal.sourceLabel, SAFE_W);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = COLORS.ink;
-    ctx.strokeText(src, cx, SOURCE_Y);
-    ctx.fillStyle = COLORS.gray;
-    ctx.fillText(src, cx, SOURCE_Y);
+    // A dark pill keeps the source readable on top of the starburst.
+    ctx.font = `22px ${FONTS.body}`;
+    const src = ellipsize(ctx, reveal.sourceLabel, SAFE_W - 40);
+    const w = ctx.measureText(src).width + 32;
+    ctx.fillStyle = 'rgba(20,18,58,0.85)';
+    ctx.beginPath();
+    ctx.roundRect(cx - w / 2, SOURCE_Y - 16, w, 32, 16);
+    ctx.fill();
+    ctx.fillStyle = COLORS.cream;
+    ctx.fillText(src, cx, SOURCE_Y + 1);
   }
   ctx.restore();
 
@@ -308,6 +313,12 @@ export function drawReveal(ctx: SKRSContext2D, reveal: Reveal, msSinceStage: num
   if (reveal.stage === 'drumroll') {
     drawDrumroll(ctx, ms, lightning);
   } else {
+    // Dim everything above the podiums so the price doesn't fight the host and the name pills.
+    // The podiums stay bright: they show everyone's guesses next to the real price.
+    ctx.save();
+    ctx.fillStyle = `rgba(14,12,40,${0.78 * clamp01(ms / 150)})`;
+    ctx.fillRect(0, 0, STAGE.w, LAYOUT.podiums.y);
+    ctx.restore();
     drawStarburst(ctx, ms, popScale(ms));
     drawPrice(ctx, reveal, ms);
     if (ms < 60) {

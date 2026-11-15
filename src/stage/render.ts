@@ -7,7 +7,7 @@ import type { StageState } from '../contracts/types';
 import { registerFonts } from './fonts';
 import { STAGE } from './theme';
 import { drawBackground } from './background';
-import { drawHud } from './hud';
+import { drawHud, drawBanner } from './hud';
 import { drawHost, type HostPose } from './host-sprite';
 import { createMouthTracker } from './mouth';
 import { drawTimerRing, drawReveal } from './overlays';
@@ -93,17 +93,23 @@ export function createRenderer(opts: RendererOpts): Renderer {
     ctx.save();
     ctx.clearRect(0, 0, STAGE.w, STAGE.h);
     layer('background', () => drawBackground(ctx, nowMs));
-    layer('hud', () => drawHud(ctx, s, nowMs));
+    // The finale scoreboard owns the screen: the HUD, podiums, caption and timer would only show
+    // through behind it, so they are not drawn. The host stays, celebrating behind the dim.
+    const finale = !!s.finale;
+    if (!finale) layer('hud', () => drawHud(ctx, s, nowMs));
     layer('host', () => {
       const shape = mouth.update(level, s.hostSpeaking, nowMs);
       drawHost(ctx, { pose: hostPose(s), mouth: shape, nowMs });
     });
-    if (s.timer) {
+    if (s.timer && !finale) {
       const timer = s.timer;
       layer('timer', () => drawTimerRing(ctx, timer, nowMs - t.timer));
     }
-    layer('podiums', () => drawPodiums(ctx, s, nowMs));
-    layer('caption', () => drawCaption(ctx, s.caption, nowMs - t.caption, settled || s.hostSpeaking));
+    if (!finale) {
+      if (s.banner) layer('hud', () => drawBanner(ctx, s));
+      layer('podiums', () => drawPodiums(ctx, s, nowMs));
+      layer('caption', () => drawCaption(ctx, s.caption, nowMs - t.caption, settled || s.hostSpeaking));
+    }
     if (s.phase === 'round_score') layer('scoreFly', () => drawScoreFly(ctx, s, nowMs - t.phase));
     if (s.reveal && s.reveal.stage !== 'none') {
       const reveal = s.reveal;
