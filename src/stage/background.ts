@@ -47,6 +47,7 @@ function paintStatic(): Canvas {
   g.fillStyle = COLORS.gold; // curtain valance trim
   g.fillRect(0, 436, 150, 4);
   g.fillRect(810, 436, 150, 4);
+  drawPedestal(g, false);
   return c;
 }
 
@@ -80,6 +81,78 @@ function drawMarquee(ctx: SKRSContext2D, nowMs: number): void {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('THE PRICE IS LIVE', m.x + m.w / 2, m.y + m.h / 2 + 1, m.w - 30);
+}
+
+// ---------- host podium base ----------
+
+/**
+ * The lower half of Chip's lectern: a pedestal from under the lectern (drawn by the host layer,
+ * which must stay inside its box) down to the stage floor, so the podium stands on the stage.
+ */
+function drawPedestal(g: SKRSContext2D, odyssey: boolean): void {
+  const cx = LAYOUT.host.x + LAYOUT.host.w / 2;
+  const top = 344;
+  const floor = 440;
+  const base = odyssey ? '#EDE6DA' : COLORS.alert;
+  const mix = (hex: string, k: number) => {
+    const n = parseInt(hex.slice(1), 16);
+    const t = k < 0 ? 0 : 255;
+    const a = Math.abs(k);
+    const c = (v: number) => Math.round(v + (t - v) * a);
+    return `rgb(${c((n >> 16) & 255)},${c((n >> 8) & 255)},${c(n & 255)})`;
+  };
+  // shadow on the floor
+  const sh = g.createRadialGradient(cx, floor + 4, 10, cx, floor + 4, 130);
+  sh.addColorStop(0, 'rgba(0,0,0,0.5)');
+  sh.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = sh;
+  g.fillRect(cx - 140, floor - 10, 280, 40);
+  // the column: continues the lectern's slant, then a stepped plinth
+  const col = g.createLinearGradient(cx - 72, 0, cx + 72, 0);
+  col.addColorStop(0, mix(base, -0.3));
+  col.addColorStop(0.3, mix(base, 0.1));
+  col.addColorStop(0.7, base);
+  col.addColorStop(1, mix(base, -0.38));
+  g.fillStyle = col;
+  g.beginPath();
+  g.moveTo(cx - 72, top);
+  g.lineTo(cx + 72, top);
+  g.lineTo(cx + 62, floor - 22);
+  g.lineTo(cx - 62, floor - 22);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = '#0E2234';
+  g.lineWidth = 2.5;
+  g.stroke();
+  if (odyssey) {
+    // fluting: vertical grooves like a Greek column
+    for (let x = -50; x <= 50; x += 14) {
+      g.strokeStyle = 'rgba(120,110,100,0.35)';
+      g.lineWidth = 3;
+      g.beginPath(); g.moveTo(cx + x, top + 6); g.lineTo(cx + x * 0.88, floor - 26); g.stroke();
+      g.strokeStyle = 'rgba(255,255,255,0.5)';
+      g.lineWidth = 1;
+      g.beginPath(); g.moveTo(cx + x + 2.5, top + 6); g.lineTo(cx + x * 0.88 + 2.5, floor - 26); g.stroke();
+    }
+  } else {
+    // a gold stripe down the middle
+    g.fillStyle = 'rgba(255,214,120,0.85)';
+    g.fillRect(cx - 3, top + 4, 6, floor - top - 30);
+  }
+  // plinth: two gold steps
+  for (const [y, h, w] of [[floor - 22, 10, 156], [floor - 12, 14, 176]] as const) {
+    const step = g.createLinearGradient(0, y, 0, y + h);
+    step.addColorStop(0, '#FFF0B8');
+    step.addColorStop(0.5, '#D9B25A');
+    step.addColorStop(1, '#7C6024');
+    g.fillStyle = step;
+    g.beginPath();
+    g.roundRect(cx - w / 2, y, w, h, 3);
+    g.fill();
+    g.strokeStyle = '#3D2F12';
+    g.lineWidth = 1.5;
+    g.stroke();
+  }
 }
 
 // ---------- Odyssey theme V2: a night voyage (HackUTA 2026) ----------
@@ -449,6 +522,7 @@ function paintOdyssey(): Canvas {
   cliff(g, 'left', rand);
   cliff(g, 'right', rand);
   paintFloor(g);
+  drawPedestal(g, true);
   return c;
 }
 

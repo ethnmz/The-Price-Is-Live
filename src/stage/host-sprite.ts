@@ -587,6 +587,142 @@ function wreath(ctx: Ctx): void {
   ctx.restore();
 }
 
+// ---------- the lectern ----------
+
+const LECTERN_TOP = 282;
+
+/**
+ * The host's lectern, in front of his body: it ends his figure naturally (no floating torso).
+ * Odyssey: white marble with veins, a gold Greek-key band and a terracotta diamond (the sail mark).
+ * Classic: a red game-show lectern with gold trim, chase-light bulbs and a gold "$" for Chip Dollar.
+ */
+function lectern(ctx: Ctx, nowMs: number): void {
+  const odyssey = theme() === 'odyssey';
+  const base = odyssey ? '#EDE6DA' : COLORS.alert;
+  const topY = LECTERN_TOP;
+  const bottom = 350;
+  // soft shadow the lectern casts on the figure behind it
+  const sh = ctx.createLinearGradient(0, topY - 18, 0, topY);
+  sh.addColorStop(0, 'rgba(10,20,30,0)');
+  sh.addColorStop(1, 'rgba(10,20,30,0.35)');
+  ctx.fillStyle = sh;
+  ctx.fillRect(CX - 96, topY - 18, 192, 18);
+  // front panel: slightly narrower at the bottom, lit from the left
+  const panel = ctx.createLinearGradient(CX - 84, 0, CX + 84, 0);
+  panel.addColorStop(0, shade(base, -0.22));
+  panel.addColorStop(0.3, shade(base, 0.12));
+  panel.addColorStop(0.7, base);
+  panel.addColorStop(1, shade(base, -0.3));
+  ctx.fillStyle = panel;
+  ctx.beginPath();
+  ctx.moveTo(CX - 84, topY + 10);
+  ctx.lineTo(CX + 84, topY + 10);
+  ctx.lineTo(CX + 72, bottom);
+  ctx.lineTo(CX - 72, bottom);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = outline();
+  ctx.lineWidth = LINE;
+  ctx.stroke();
+  if (odyssey) {
+    // marble veins
+    ctx.save();
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(140,130,120,0.35)';
+    ctx.lineWidth = 1.2;
+    for (const [x0, y0, x1, y1] of [[-70, 300, -20, 346], [-30, 296, 10, 330], [20, 312, 70, 300], [40, 330, 64, 348]] as const) {
+      ctx.beginPath();
+      ctx.moveTo(CX + x0, y0);
+      ctx.bezierCurveTo(CX + x0 + 15, y0 + 10, CX + x1 - 15, y1 - 6, CX + x1, y1);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // gold Greek-key band
+    const band = ctx.createLinearGradient(0, topY + 16, 0, topY + 28);
+    band.addColorStop(0, '#FFF0B8');
+    band.addColorStop(0.5, COLORS.gold);
+    band.addColorStop(1, shade(COLORS.gold, -0.45));
+    ctx.fillStyle = band;
+    ctx.fillRect(CX - 82, topY + 16, 164, 12);
+    ctx.strokeStyle = 'rgba(70,45,10,0.8)';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    for (let x = CX - 78; x < CX + 74; x += 10) {
+      ctx.moveTo(x, topY + 26); ctx.lineTo(x, topY + 18); ctx.lineTo(x + 7, topY + 18); ctx.lineTo(x + 7, topY + 24); ctx.lineTo(x + 3, topY + 24); ctx.lineTo(x + 3, topY + 21);
+    }
+    ctx.stroke();
+    // the diamond emblem with a terracotta gem
+    const ey = 324;
+    ctx.fillStyle = COLORS.ink;
+    ctx.beginPath();
+    ctx.moveTo(CX, ey - 16); ctx.lineTo(CX + 16, ey); ctx.lineTo(CX, ey + 16); ctx.lineTo(CX - 16, ey);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = COLORS.gold;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const gem = ctx.createRadialGradient(CX - 2, ey - 3, 1, CX, ey, 7);
+    gem.addColorStop(0, '#F2A088');
+    gem.addColorStop(1, '#8E3A24');
+    ctx.fillStyle = gem;
+    ctx.beginPath();
+    ctx.arc(CX, ey, 6, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // gold trim band with chase-light bulbs
+    const band = ctx.createLinearGradient(0, topY + 14, 0, topY + 30);
+    band.addColorStop(0, '#FFF0B8');
+    band.addColorStop(1, shade(COLORS.gold, -0.4));
+    ctx.fillStyle = band;
+    ctx.fillRect(CX - 82, topY + 14, 164, 16);
+    const phase = Math.floor(nowMs / 180) % 3;
+    for (let i = 0, x = CX - 74; x <= CX + 74; x += 13, i++) {
+      const on = i % 3 === phase;
+      ctx.fillStyle = on ? '#FFF6C8' : '#8A6A20';
+      if (on) { ctx.shadowColor = '#FFE27A'; ctx.shadowBlur = 8; }
+      ctx.beginPath();
+      ctx.arc(x, topY + 22, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    // a gold "$" for Chip Dollar
+    ctx.font = 'bold 34px "Arial Black", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = shade(COLORS.alert, -0.5);
+    ctx.strokeText('$', CX, 328);
+    const g = ctx.createLinearGradient(0, 312, 0, 344);
+    g.addColorStop(0, '#FFF0B8');
+    g.addColorStop(1, shade(COLORS.gold, -0.3));
+    ctx.fillStyle = g;
+    ctx.fillText('$', CX, 328);
+  }
+  // the top slab: a thick, lit ledge his hands can rest on
+  const slab = ctx.createLinearGradient(0, topY, 0, topY + 12);
+  const slabBase = odyssey ? '#F6F0E6' : COLORS.gold;
+  slab.addColorStop(0, shade(slabBase, 0.35));
+  slab.addColorStop(1, shade(slabBase, -0.25));
+  ctx.fillStyle = slab;
+  ctx.beginPath();
+  ctx.roundRect(CX - 94, topY, 188, 12, 4);
+  ctx.fill();
+  ctx.strokeStyle = outline();
+  ctx.lineWidth = LINE;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fillRect(CX - 90, topY + 2, 180, 1.5);
+  if (odyssey) {
+    // warm sunset rim on the right edge
+    ctx.strokeStyle = 'rgba(255,205,140,0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(CX + 83, topY + 12);
+    ctx.lineTo(CX + 71, bottom);
+    ctx.stroke();
+  }
+}
+
 // ---------- the host ----------
 
 export function drawHost(ctx: Ctx, a: { pose: HostPose; mouth: MouthShape; nowMs: number }): void {
@@ -608,12 +744,13 @@ export function drawHost(ctx: Ctx, a: { pose: HostPose; mouth: MouthShape; nowMs
     ctx.fillRect(b.x, b.y, b.w, b.h);
   }
   ctx.translate(0, -bob);
-  let leftElbow: Pt = [CX - 82, 288];
-  let leftHand: Pt = [CX - 84, 316];
-  let rightElbow: Pt = [CX + 82, 286];
-  let rightHand: Pt = [CX + 86, 304];
+  // idle: both hands rest on the lectern's top edge
+  let leftElbow: Pt = [CX - 84, 272];
+  let leftHand: Pt = [CX - 62, LECTERN_TOP - 2];
+  let rightElbow: Pt = [CX + 84, 268];
+  let rightHand: Pt = [CX + 66, LECTERN_TOP - 8];
   let tilt = 0.15;
-  let leftAngle = Math.PI / 2;
+  let leftAngle = 0.15;
   if (pose === 'talking') {
     rightElbow = [CX + 88, 280];
     rightHand = [CX + 58, 226];
@@ -637,6 +774,7 @@ export function drawHost(ctx: Ctx, a: { pose: HostPose; mouth: MouthShape; nowMs
   head(ctx, mouth, isBlinking(nowMs));
   if (odyssey) wreath(ctx);
   else bowTie(ctx);
+  lectern(ctx, nowMs);
   hand(ctx, leftHand, leftAngle);
   mic(ctx, rightHand, tilt);
   if (odyssey) {
