@@ -299,6 +299,36 @@ describe('automatic TEXT MODE', () => {
     expect(sim.s.textMode).toBe(false);
   });
 
+  it.each([false, true])('preserves input while accepting unparsed audio (frozen=%s)', (frozen) => {
+    const sim = startGame();
+    sim.fire('show');
+    sim.fire('guess');
+    expect(sim.s.silentWindows).toBe(1);
+    const before = sim.s;
+    const snapshot = structuredClone(before);
+    if (frozen) {
+      const freeze = (value: object): void => {
+        for (const child of Object.values(value)) {
+          if (child && typeof child === 'object') freeze(child);
+        }
+        Object.freeze(value);
+      };
+      freeze(before);
+    }
+    const effects = sim.send({ type: 'SPEECH_FINAL', text: 'hmm let me think', confidence: 0.9 });
+    expect(before).toEqual(snapshot);
+    expect(sim.s).not.toBe(before);
+    expect(sim.state.windowSpeechSeen).toBe(true);
+    expect(sim.s.silentWindows).toBe(0);
+    expect(sim.s.now).toBe(sim.t);
+    expect(sim.s.timer).toEqual(snapshot.timer);
+    expect(sim.s.guesses).toEqual(snapshot.guesses);
+    expect(effects).toEqual([expect.objectContaining({ type: 'LOG', level: 'info', msg: 'ignored SPEECH_FINAL: not a guess' })]);
+    sim.fire('guess');
+    expect(sim.s.silentWindows).toBe(0);
+    expect(sim.s.textMode).toBe(false);
+  });
+
   it('leaves state untouched for speech outside a listening window', () => {
     const sim = startGame();
     const before = sim.s;

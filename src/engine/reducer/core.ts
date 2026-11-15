@@ -76,8 +76,8 @@ export interface Ctx {
   cfg: GameConfig;
   /** Set when the event does not fit: reduce() then returns the old state plus a LOG. */
   ignored: string | null;
-  /** With `ignored`: speech was heard in a guess window, so note it on the returned state (see reduce). */
-  keepOnIgnore?: boolean;
+  /** Speech accepted in an open guess window; preserve the cloned audio activity state even without a guess. */
+  audioActivity?: boolean;
 }
 
 /** Config with the demo overrides applied when a `demo` text turned demo on after boot. */

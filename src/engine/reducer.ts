@@ -35,10 +35,8 @@ export const reduce: Reduce = (state, event, deps) => {
     s.now = event.at;
     dispatch(c, event);
     if (c.ignored) {
-      // Unparsed speech in a guess window is not a guess, but it proves the audio works. Keep that note on the
-      // same state object (two small counters only) so the event stays "ignored" and the state identity holds.
-      if (c.keepOnIgnore) Object.assign(state, { windowSpeechSeen: true, silentWindows: 0 });
-      return { state, effects: [ignoredLog(state, event, c.ignored)] };
+      // Unparsed speech can still be accepted audio activity in an open guess window.
+      return { state: c.audioActivity ? s : state, effects: [ignoredLog(state, event, c.ignored)] };
     }
     return { state: s, effects: c.fx };
   } catch (err) {
@@ -137,7 +135,7 @@ function noteSpeech(c: Ctx): void {
   if (!s.listenOpen || (s.phase !== 'guess_listen' && s.phase !== 'guess_confirm')) return;
   s.windowSpeechSeen = true;
   s.silentWindows = 0;
-  c.keepOnIgnore = true; // an unparsed "hmm" is ignored as a guess but still counts as audio
+  c.audioActivity = true; // an unparsed "hmm" still counts as accepted audio activity
 }
 
 /** Switch lightning on (for good) when the game would not finish before the cap. */

@@ -570,11 +570,16 @@ describe('guess window', () => {
     expect(sim.keys(mark)).toEqual(['guess.nudge', 'guess.silent', 'guess.prompt']);
   });
 
-  it('ignores talk that is not a guess, and speech while the mic is closed', () => {
+  it('accepts unparsed audio activity, and ignores speech while the mic is closed', () => {
     const sim = atFirstGuess();
     const before = sim.s;
+    const snapshot = structuredClone(before);
     sim.say('hmm let me think');
-    expect(sim.s).toBe(before);
+    expect(sim.s).not.toBe(before);
+    expect(before).toEqual(snapshot);
+    expect(sim.priv.windowSpeechSeen).toBe(true);
+    expect(sim.s.guesses).toEqual(before.guesses);
+    expect(sim.s.timer).toEqual(before.timer);
     // while the host is still speaking the prompt, the mic is closed and speech is dropped
     const sim2 = withPlayers([A, B, C]);
     sendItems(sim2, [A, B, C], [2000, 2000, 2000]);
