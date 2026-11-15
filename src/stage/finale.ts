@@ -5,7 +5,7 @@
 // credit line and recap strip stay readable after video compression.
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
-import { COLORS, CREDIT_LINE, FONTS, SEAT_COLORS, STAGE, podiumXs, PODIUM_W, LAYOUT, theme, type Box } from './theme';
+import { COLORS, CREDIT_LINE, FONTS, SEAT_COLORS, STAGE, podiumXs, PODIUM_W, LAYOUT, shape, theme, type Box } from './theme';
 import { bevelBox, ribbon, sparkle, textFx } from './fx';
 
 // ---------- score fly ----------
@@ -64,13 +64,36 @@ export function drawScoreFly(ctx: SKRSContext2D, s: StageState, msSincePhase: nu
 // ---------- finale ----------
 
 /** Layout boxes (all inside the safe area). */
-export const FINALE_BOXES: Record<'banner' | 'board' | 'items' | 'credit', Box> = {
-  banner: { x: STAGE.safeX, y: 40, w: STAGE.w - 2 * STAGE.safeX, h: 64 },
-  board: { x: 180, y: 118, w: 600, h: 270 },
-  items: { x: STAGE.safeX, y: 408, w: STAGE.w - 2 * STAGE.safeX, h: 40 },
-  credit: { x: STAGE.safeX, y: 470, w: STAGE.w - 2 * STAGE.safeX, h: 30 },
-};
+type FinaleBoxes = Record<'banner' | 'board' | 'items' | 'credit', Box>;
+
+function finaleBoxesFor(): FinaleBoxes {
+  const x = STAGE.safeX;
+  const w = STAGE.w - 2 * STAGE.safeX;
+  if (shape() === 'square') {
+    // the square frame: full-width rows, the whole block centred top to bottom
+    return {
+      banner: { x, y: 80, w, h: 64 },
+      board: { x, y: 166, w, h: 330 },
+      items: { x, y: 520, w, h: 44 },
+      credit: { x, y: 584, w, h: 30 },
+    };
+  }
+  return {
+    banner: { x, y: 40, w, h: 64 },
+    board: { x: 180, y: 118, w: 600, h: 270 },
+    items: { x, y: 408, w, h: 40 },
+    credit: { x, y: 470, w, h: 30 },
+  };
+}
+
+/** Layout boxes (all inside the safe area). Refreshed for the current frame shape on every finale draw. */
+export const FINALE_BOXES: FinaleBoxes = finaleBoxesFor();
 export const CREDIT_POS = { x: STAGE.w / 2, y: FINALE_BOXES.credit.y + FINALE_BOXES.credit.h / 2 };
+
+function syncFinaleBoxes(): void {
+  Object.assign(FINALE_BOXES, finaleBoxesFor());
+  Object.assign(CREDIT_POS, { x: STAGE.w / 2, y: FINALE_BOXES.credit.y + FINALE_BOXES.credit.h / 2 });
+}
 
 export const SLIDE_MS = 600;
 export const CONFETTI_MS = 6000;
@@ -257,6 +280,7 @@ function drawCredit(ctx: SKRSContext2D): void {
 
 export function drawFinale(ctx: SKRSContext2D, s: StageState, msSincePhase: number): void {
   if (!s.finale) return;
+  syncFinaleBoxes();
   const ms = Math.max(0, msSincePhase);
   ctx.save();
   ctx.globalAlpha = 1;
