@@ -17,7 +17,7 @@ export const schemas = {
   guess: z.object({ gameId: text, roundIndex: count, playerId, cents: z.number().int().min(100).max(9999900).nullable(), status: z.enum(['locked', 'silent', 'pass']), channel: z.enum(['voice', 'text']).nullable(), transcript: z.string().nullable().optional(), corrected: z.boolean(), points: count }),
   result: z.object({ gameId: text, scoreboard, items: z.array(z.object({ owner: text, name: text, priceCents: money, isEstimate: z.boolean() })), cardText: text.optional(), sentAt: count }),
   priceCache: z.object({ cleanText: text, result: priceSchema, createdAt: z.union([count, z.date(), z.string().datetime()]) }),
-  evalRun: z.object({ runId: text, ranAt: z.union([count, z.date(), z.string().datetime()]), variant: text, models: z.union([text, z.array(text), z.record(z.string(), text)]), n: count, within15: z.number().nonnegative(), within25: z.number().nonnegative(), medianAbsPctError: z.number().nonnegative(), perItem: z.array(z.record(z.string(), z.unknown())) }),
+  evalRun: z.object({ runId: text, ranAt: z.union([count, z.date(), z.string().datetime()]), variant: text, models: z.union([text, z.array(text), z.record(z.string(), text)]), n: count, within15: z.number().nonnegative(), within25: z.number().nonnegative(), medianAbsPctError: z.number().nonnegative().nullable(), perItem: z.array(z.record(z.string(), z.unknown())) }),
 };
 
 // Remove whole fields rather than keeping fragments of private content.
