@@ -10,17 +10,20 @@ export class ChertError extends Error {
   code: string;
   status: number;
   human: string;
-  constructor(code: string, status: number, human: string) {
+  /** Chert's own error message, for logs. */
+  detail?: string;
+  constructor(code: string, status: number, human: string, detail?: string) {
     super(`${code} (${status}): ${human}`);
     this.name = 'ChertError';
     this.code = code;
     this.status = status;
     this.human = human;
+    this.detail = detail;
   }
 }
 
 export interface ChertClient {
-  createCall(a: { phones: string[]; livekitUrl: string; participantToken: string; agentIdentity: string; idemKey: string }): Promise<{ callId: string }>;
+  createCall(a: { phones: string[]; livekitUrl: string; participantToken: string; agentIdentity: string; idemKey: string; video?: boolean }): Promise<{ callId: string }>;
   getCall(callId: string): Promise<{ status: string; terminal: boolean; endReason: string | null }>;
   getCallEvents(callId: string): Promise<{ type: string }[]>;
   endCall(callId: string, idemKey: string): Promise<void>;
@@ -160,9 +163,10 @@ export function createChertClient(cfg: ChertConfig): ChertClient {
   }
 
   function fail(status: number, json: unknown): never {
-    const e = (json as { error?: { code?: unknown } } | null)?.error;
+    const e = (json as { error?: { code?: unknown; message?: unknown } } | null)?.error;
     const code = typeof e?.code === 'string' ? e.code : `http_${status}`;
-    throw new ChertError(code, status, humanFor(code, status));
+    const detail = typeof e?.message === 'string' ? e.message.slice(0, 300) : JSON.stringify(json ?? null).slice(0, 300);
+    throw new ChertError(code, status, humanFor(code, status), detail);
   }
 
   /** Request a calls endpoint; on 404 try once on the other base URL. */
@@ -188,7 +192,7 @@ export function createChertClient(cfg: ChertConfig): ChertClient {
         direction: 'outbound',
         mode: 'customer_managed',
         line_id: cfg.lineId,
-        media: { audio: true, video: true },
+        media: { audio: true, video: a.video ?? true },
         livekit_url: a.livekitUrl,
         participant_token: a.participantToken,
         remote_participant_identity: a.agentIdentity,

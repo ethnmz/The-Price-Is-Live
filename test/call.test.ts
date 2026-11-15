@@ -55,6 +55,42 @@ beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe('createCallPort', () => {
+  it('steps down from group video to group audio to the main player alone when groups are off', async () => {
+    const seen: { phones: string[]; video?: boolean }[] = [];
+    const t = setup({
+      createCall: vi.fn(async (a: { phones: string[]; video?: boolean }) => {
+        seen.push({ phones: a.phones, video: a.video });
+        if (a.phones.length >= 2) throw new ChertError('facetime_group_unavailable', 409, 'no groups');
+        return { callId: 'solo' };
+      }) as unknown as ChertClient['createCall'],
+    });
+    const { callId } = await t.port.dial(['+12145550101', '+12145550102']);
+    expect(callId).toBe('solo');
+    expect(seen).toEqual([
+      { phones: ['+12145550101', '+12145550102'], video: true },
+      { phones: ['+12145550101', '+12145550102'], video: false },
+      { phones: ['+12145550101'], video: true },
+    ]);
+  });
+
+  it('stops at group audio when the line allows audio groups', async () => {
+    const t = setup({
+      createCall: vi.fn(async (a: { video?: boolean }) => {
+        if (a.video) throw new ChertError('facetime_group_unavailable', 409, 'no group video');
+        return { callId: 'group-audio' };
+      }) as unknown as ChertClient['createCall'],
+    });
+    expect((await t.port.dial(['+12145550101', '+12145550102'])).callId).toBe('group-audio');
+  });
+
+  it('does not step down for other refusals', async () => {
+    const t = setup({
+      createCall: vi.fn(async () => { throw new ChertError('recipient_not_verified', 422, 'not verified'); }) as unknown as ChertClient['createCall'],
+    });
+    await expect(t.port.dial(['+12145550101', '+12145550102'])).rejects.toThrow('not verified');
+    expect(t.chert.createCall).toHaveBeenCalledTimes(1);
+  });
+
   it('connects before createCall and readies only after bridge_ready', async () => {
     const t = setup();
     const { callId } = await t.port.dial(['+12145550101']);
