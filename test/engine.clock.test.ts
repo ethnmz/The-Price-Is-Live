@@ -175,13 +175,28 @@ describe('automatic TEXT MODE', () => {
     expect(g.keys().filter(k => k === 'guess.textmode')).toHaveLength(1);
   });
 
-  it.each(['SPEECH_PARTIAL', 'SPEECH_FINAL'] as const)('resets the streak on %s even without a parsed amount', type => {
+  it('resets the streak on a partial even without a parsed amount', () => {
     const g = game();
     g.fire('show'); g.fire('guess');
-    g.send(type === 'SPEECH_PARTIAL' ? { type, text: 'hmm' } : { type, text: 'hmm', confidence: 1 });
+    g.send({ type: 'SPEECH_PARTIAL', text: 'hmm' });
     expect(g.s.silentWindows).toBe(0);
     g.fire('guess');
     expect(g.s.silentWindows).toBe(0);
+    expect(g.s.textMode).toBe(false);
+  });
+
+  it('preserves state for an unparseable final and resets the streak for a guess', () => {
+    const g = game();
+    g.fire('show'); g.fire('guess');
+    const before = g.s;
+    const fx = g.send({ type: 'SPEECH_FINAL', text: 'hmm let me think', confidence: 1 });
+    expect(g.s).toBe(before);
+    expect(fx).toEqual([expect.objectContaining({ type: 'LOG', level: 'info' })]);
+    expect(g.s.silentWindows).toBe(1);
+    g.send({ type: 'SPEECH_FINAL', text: '10', confidence: 1 });
+    expect(g.s.silentWindows).toBe(0);
+    g.settle();
+    g.fire('confirm');
     expect(g.s.textMode).toBe(false);
   });
 });

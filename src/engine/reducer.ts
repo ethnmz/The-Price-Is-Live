@@ -37,11 +37,8 @@ export const reduce: Reduce = (state, event, deps) => {
       s.silentWindows = 0;
     }
     dispatch(c, event);
-    // Even an unparseable speech event proves the audio path is alive.
-    if (speechInWindow && c.ignored) {
-      c.fx.push(ignoredLog(state, event, c.ignored));
-      c.ignored = null;
-    }
+    // Ignored finals preserve state identity, including the silence bookkeeping.
+    // Accepted partials still prove the audio path is alive without an amount.
     if (c.ignored) return { state, effects: [ignoredLog(state, event, c.ignored)] };
     return { state: s, effects: c.fx };
   } catch (err) {
