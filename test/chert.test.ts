@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createChertClient, ChertError } from '../src/comms/chert';
+import { createChertClient, ChertError, matchMasked } from '../src/comms/chert';
 import { mintToken } from '../src/comms/token';
 import * as fx from '../fixtures/chert';
 
@@ -25,6 +25,38 @@ const hdr = (c: Call) => c.init.headers as Record<string, string>;
 const callArgs = { livekitUrl: 'wss://x.test', participantToken: 'jwt', agentIdentity: 'host-agent', idemKey: 'idem-key-1' };
 
 describe('chert client', () => {
+  it('reads call events in the real { data: { events } } shape, so bridge_ready is seen', async () => {
+    const body = { data: { call_id: 'c1', events: [
+      { id: 'e1', type: 'dialing', at: '2026-11-15T07:59:35Z', sequence: 2, source: 'worker' },
+      { id: 'e2', type: 'bridge_ready', at: '2026-11-15T07:59:43Z', sequence: 5, source: 'worker' },
+    ] }, request_id: 'r' };
+    const { f } = fakeFetch([json(body)]);
+    const client = createChertClient({ ...cfg, fetch: f });
+    expect((await client.getCallEvents('c1')).map((e) => e.type)).toEqual(['dialing', 'bridge_ready']);
+  });
+
+  it('reads the real shared-messages shape: data.items with masked senders', async () => {
+    // As returned by Chert's shared line on 15 Nov 2026 (numbers made up here).
+    const body = { data: { items: [
+      { id: 'm3', line_id: 'line-1', direction: 'outbound', state: 'sent', masked_recipient: '•••0101', created_at: '2026-11-15T06:06:16Z', text: 'reply' },
+      { id: 'm2', line_id: 'line-1', direction: 'inbound', state: 'received', masked_recipient: '•••0101', created_at: '2026-11-15T06:06:15Z', text: 'start' },
+      { id: 'm1', line_id: 'line-1', direction: 'inbound', state: 'received', masked_recipient: '•••9999', created_at: '2026-11-15T06:05:00Z', text: "I'm in, I'm Zed" },
+    ] }, request_id: 'r1' };
+    const { f } = fakeFetch([json(body)]);
+    const client = createChertClient({ ...cfg, roster: ['+12145550101', '+12145550102'], fetch: f });
+    const msgs = await client.listMessages();
+    expect(msgs.find((m) => m.id === 'm2')).toMatchObject({ phone: '+12145550101', text: 'start', inbound: true });
+    expect(msgs.find((m) => m.id === 'm1')).toBeUndefined(); // sender not on the roster: ignored
+    expect(msgs.find((m) => m.id === 'm3')).toMatchObject({ inbound: false, phone: '+12145550101' });
+  });
+
+  it('matches a masked handle only when exactly one roster number fits', () => {
+    expect(matchMasked('•••0101', ['+12145550101', '+12145550102'])).toBe('+12145550101');
+    expect(matchMasked('•••01', ['+12145550101', '+13125550101'])).toBeNull(); // ambiguous
+    expect(matchMasked('•••0101', [])).toBeNull();
+    expect(matchMasked(undefined, ['+12145550101'])).toBeNull();
+  });
+
   it('sends auth headers and idempotency key; group body', async () => {
     const { client, calls } = mk([json(fx.CREATE_CALL_RESPONSE, 201)]);
     const r = await client.createCall({ ...callArgs, phones: ['+12145550101', '+12145550102'] });

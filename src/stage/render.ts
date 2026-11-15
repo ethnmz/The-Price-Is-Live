@@ -5,17 +5,18 @@
 import { createCanvas, type Canvas, type SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
 import { registerFonts } from './fonts';
-import { STAGE } from './theme';
+import { STAGE, applyTheme } from './theme';
 import { drawBackground } from './background';
-import { drawHud } from './hud';
+import { drawHud, drawBanner, drawJoinHint } from './hud';
 import { drawHost, type HostPose } from './host-sprite';
 import { createMouthTracker } from './mouth';
 import { drawTimerRing, drawReveal } from './overlays';
 import { drawPodiums } from './podium';
 import { drawCaption } from './captions';
 import { drawScoreFly, drawFinale } from './finale';
+import { finish } from './fx';
 
-export type LayerName = 'background' | 'hud' | 'host' | 'timer' | 'podiums' | 'caption' | 'scoreFly' | 'reveal' | 'finale';
+export type LayerName = 'background' | 'hud' | 'host' | 'timer' | 'podiums' | 'caption' | 'scoreFly' | 'reveal' | 'finale' | 'finish';
 
 export interface Renderer {
   render(s: StageState, nowMs: number, mouthLevel: number | null): Uint8Array;
@@ -27,6 +28,8 @@ export interface Renderer {
 export interface RendererOpts {
   width: number;
   height: number;
+  /** Stage look: 'classic' (default) or 'odyssey'. Defaults to the STAGE_THEME environment variable. */
+  theme?: string;
   /** Tests only: make this layer throw. */
   failLayer?: LayerName;
   log?: (msg: string) => void;
@@ -47,6 +50,7 @@ function timerKey(t: StageState['timer']): string {
 }
 
 export function createRenderer(opts: RendererOpts): Renderer {
+  applyTheme(opts.theme ?? process.env.STAGE_THEME);
   registerFonts();
   const { width, height } = opts;
   const log = opts.log ?? ((m: string) => console.warn(m));
@@ -93,23 +97,32 @@ export function createRenderer(opts: RendererOpts): Renderer {
     ctx.save();
     ctx.clearRect(0, 0, STAGE.w, STAGE.h);
     layer('background', () => drawBackground(ctx, nowMs));
-    layer('hud', () => drawHud(ctx, s, nowMs));
+    // The finale scoreboard owns the screen: the HUD, podiums, caption and timer would only show
+    // through behind it, so they are not drawn. The host stays, celebrating behind the dim.
+    const finale = !!s.finale;
+    if (!finale) layer('hud', () => drawHud(ctx, s, nowMs));
     layer('host', () => {
       const shape = mouth.update(level, s.hostSpeaking, nowMs);
       drawHost(ctx, { pose: hostPose(s), mouth: shape, nowMs });
     });
-    if (s.timer) {
+    if (s.timer && !finale) {
       const timer = s.timer;
       layer('timer', () => drawTimerRing(ctx, timer, nowMs - t.timer));
     }
-    layer('podiums', () => drawPodiums(ctx, s, nowMs));
-    layer('caption', () => drawCaption(ctx, s.caption, nowMs - t.caption, settled || s.hostSpeaking));
+    if (!finale) {
+      if (s.banner) layer('hud', () => drawBanner(ctx, s));
+      if (s.joinHint) layer('hud', () => drawJoinHint(ctx, s));
+      layer('podiums', () => drawPodiums(ctx, s, nowMs));
+      layer('caption', () => drawCaption(ctx, s.caption, nowMs - t.caption, settled || s.hostSpeaking));
+    }
     if (s.phase === 'round_score') layer('scoreFly', () => drawScoreFly(ctx, s, nowMs - t.phase));
     if (s.reveal && s.reveal.stage !== 'none') {
       const reveal = s.reveal;
       layer('reveal', () => drawReveal(ctx, reveal, nowMs - t.reveal, s.lightning));
     }
     if (s.finale) layer('finale', () => drawFinale(ctx, s, nowMs - t.phase));
+    // V2 finish: vignette and a light film grain over the whole frame
+    layer('finish', () => finish(ctx, nowMs));
     ctx.restore();
     if (scaled) letterbox();
   }

@@ -10,17 +10,20 @@ export class ChertError extends Error {
   code: string;
   status: number;
   human: string;
-  constructor(code: string, status: number, human: string) {
+  /** Chert's own error message, for logs. */
+  detail?: string;
+  constructor(code: string, status: number, human: string, detail?: string) {
     super(`${code} (${status}): ${human}`);
     this.name = 'ChertError';
     this.code = code;
     this.status = status;
     this.human = human;
+    this.detail = detail;
   }
 }
 
 export interface ChertClient {
-  createCall(a: { phones: string[]; livekitUrl: string; participantToken: string; agentIdentity: string; idemKey: string }): Promise<{ callId: string }>;
+  createCall(a: { phones: string[]; livekitUrl: string; participantToken: string; agentIdentity: string; idemKey: string; video?: boolean }): Promise<{ callId: string }>;
   getCall(callId: string): Promise<{ status: string; terminal: boolean; endReason: string | null }>;
   getCallEvents(callId: string): Promise<{ type: string }[]>;
   endCall(callId: string, idemKey: string): Promise<void>;
@@ -34,6 +37,11 @@ export interface ChertConfig {
   lineId: string;
   facetimeBase: string;
   appBase: string;
+  /**
+   * Players' full numbers (E.164). The shared-line message API hides senders as "•••0101", so an
+   * inbound text is matched to the one roster number ending in those digits. From PLAYER_PHONES.
+   */
+  roster?: string[];
   fetch?: typeof fetch;
 }
 
@@ -55,9 +63,24 @@ const TERMINAL = new Set(['ended', 'failed', 'canceled', 'cancelled', 'completed
 const str = z.union([z.string(), z.number()]).transform(String);
 const callIdBody = z.object({ data: z.object({ id: str }) });
 const callBody = z.object({
-  data: z.object({ status: str.optional(), end_reason: z.string().nullish() }).passthrough(),
+  data: z.object({ status: str.optional(), end_reason: z.string().nullish(), terminal_detail: z.string().nullish(), terminal_reason: z.string().nullish() }).passthrough(),
 });
 const eventsBody = z.object({ data: z.array(z.unknown()) });
+/** GET /calls/{id}/events answers { data: { call_id, events: [...] } } (seen 15 Nov 2026); older shapes used { data: [...] }. */
+const callEventsBody = z.object({
+  data: z.union([z.array(z.unknown()), z.object({ events: z.array(z.unknown()) }).passthrough(), z.object({ items: z.array(z.unknown()) }).passthrough()]),
+});
+/** GET /shared-messages answers { data: { items: [...] } }; older shapes used { data: [...] }. */
+const messagesBody = z.object({ data: z.union([z.array(z.unknown()), z.object({ items: z.array(z.unknown()) })]) });
+
+/** The roster number whose last digits match a masked handle like "•••0101" (only if exactly one does). */
+export function matchMasked(masked: unknown, roster: string[]): string | null {
+  if (typeof masked !== 'string') return null;
+  const tail = masked.replace(/\D/g, '');
+  if (tail.length < 2) return null;
+  const hits = roster.filter((p) => p.replace(/\D/g, '').endsWith(tail));
+  return hits.length === 1 ? hits[0] : null;
+}
 
 function trimBase(b: string): string {
   return b.replace(/\/+$/, '');
@@ -79,7 +102,7 @@ function pick(o: Record<string, unknown>, keys: string[]): unknown {
   return undefined;
 }
 
-function normalizeMessage(raw: unknown): { id: string; phone: string; text: string; at: number; inbound: boolean } | null {
+function normalizeMessage(raw: unknown, roster: string[] = []): { id: string; phone: string; text: string; at: number; inbound: boolean } | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
   const id = pick(o, ['id', 'message_id']);
@@ -94,7 +117,8 @@ function normalizeMessage(raw: unknown): { id: string; phone: string; text: stri
   else inbound = pick(o, ['recipient']) === undefined;
 
   const who = pick(o, inbound ? ['sender', 'from', 'handle'] : ['recipient', 'to', 'sender', 'from', 'handle']);
-  const phone = typeof who === 'string' ? toE164(who) : null;
+  let phone = typeof who === 'string' ? toE164(who) : null;
+  if (!phone) phone = matchMasked(pick(o, ['masked_sender', 'masked_handle', 'masked_recipient']), roster);
   if (!phone && inbound) return null; // cannot tell who spoke
   return {
     id: String(id),
@@ -143,9 +167,10 @@ export function createChertClient(cfg: ChertConfig): ChertClient {
   }
 
   function fail(status: number, json: unknown): never {
-    const e = (json as { error?: { code?: unknown } } | null)?.error;
+    const e = (json as { error?: { code?: unknown; message?: unknown } } | null)?.error;
     const code = typeof e?.code === 'string' ? e.code : `http_${status}`;
-    throw new ChertError(code, status, humanFor(code, status));
+    const detail = typeof e?.message === 'string' ? e.message.slice(0, 300) : JSON.stringify(json ?? null).slice(0, 300);
+    throw new ChertError(code, status, humanFor(code, status), detail);
   }
 
   /** Request a calls endpoint; on 404 try once on the other base URL. */
@@ -171,7 +196,7 @@ export function createChertClient(cfg: ChertConfig): ChertClient {
         direction: 'outbound',
         mode: 'customer_managed',
         line_id: cfg.lineId,
-        media: { audio: true, video: true },
+        media: { audio: true, video: a.video ?? true },
         livekit_url: a.livekitUrl,
         participant_token: a.participantToken,
         remote_participant_identity: a.agentIdentity,
@@ -193,17 +218,19 @@ export function createChertClient(cfg: ChertConfig): ChertClient {
       return {
         status,
         terminal: TERMINAL.has(status.toLowerCase()),
-        endReason: p.success ? (p.data.data.end_reason ?? null) : null,
+        endReason: p.success ? (p.data.data.end_reason ?? p.data.data.terminal_detail ?? p.data.data.terminal_reason ?? null) : null,
       };
     },
 
     async getCallEvents(callId) {
       const json = await callsRequest('GET', `/calls/${encodeURIComponent(callId)}/events`);
-      const p = eventsBody.safeParse(json);
+      const p = callEventsBody.safeParse(json);
       if (!p.success) return [];
+      const d = p.data.data;
+      const list = Array.isArray(d) ? d : 'events' in d ? (d.events as unknown[]) : (d.items as unknown[]);
       const out: { type: string }[] = [];
-      for (const e of p.data.data) {
-        const t = e && typeof e === 'object' ? pick(e as Record<string, unknown>, ['type', 'event', 'name']) : undefined;
+      for (const e of list) {
+        const t = e && typeof e === 'object' ? pick(e as Record<string, unknown>, ['type', 'event_type', 'event', 'name']) : undefined;
         if (typeof t === 'string') out.push({ type: t });
       }
       return out;
@@ -225,11 +252,12 @@ export function createChertClient(cfg: ChertConfig): ChertClient {
 
     async listMessages() {
       const json = await appRequest('GET', '/shared-messages');
-      const p = eventsBody.safeParse(json);
+      const p = messagesBody.safeParse(json);
       if (!p.success) return [];
+      const list = Array.isArray(p.data.data) ? p.data.data : p.data.data.items;
       const out = [];
-      for (const raw of p.data.data) {
-        const m = normalizeMessage(raw);
+      for (const raw of list) {
+        const m = normalizeMessage(raw, cfg.roster ?? []);
         if (m) out.push(m);
       }
       return out;

@@ -54,7 +54,7 @@ export function stageFixture(phase: Phase, count: 2 | 3 | 4 = 4): StageState {
     case 'dialing':
       s.podiums = [];
       s.turnOrder = [];
-      s.joinHint = "Text (214) 555-0100: I'm in, I'm {name}";
+      s.joinHint = `Text "I'm in, I'm [your name]" to (214) 555-0100`;
       break;
     case 'connected':
       s.caption = host("Hello, hello, HELLO! Welcome to THE PRICE IS LIVE! I'm your host, Chip Dollar!");
@@ -63,7 +63,7 @@ export function stageFixture(phase: Phase, count: 2 | 3 | 4 = 4): StageState {
     case 'lobby':
       s.podiums = s.podiums.slice(0, 1);
       s.turnOrder = s.turnOrder.slice(0, 1);
-      s.joinHint = "Text (214) 555-0100: I'm in, I'm {name}";
+      s.joinHint = `Text "I'm in, I'm [your name]" to (214) 555-0100`;
       s.caption = host("I only see 1 of you so far. Text me 'I'm in' and your name!");
       break;
     case 'rules':

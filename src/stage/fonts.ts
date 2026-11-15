@@ -10,6 +10,11 @@ import { join } from 'node:path';
 const FILES: { file: string; family: string }[] = [
   { file: 'Bungee-Regular.ttf', family: 'Bungee' },
   { file: 'LilitaOne-Regular.ttf', family: 'Lilita One' },
+  // Odyssey theme (SIL OFL, see OFL-*.txt). Cinzel-ExtraBold is a static weight-800 instance of the
+  // Google Fonts variable Cinzel, made with fontTools so the canvas gets a bold face by family name.
+  { file: 'Cinzel-ExtraBold.ttf', family: 'Cinzel' },
+  { file: 'BarlowSemiCondensed-SemiBold.ttf', family: 'Barlow Semi Condensed' },
+  { file: 'BarlowSemiCondensed-ExtraBold.ttf', family: 'Barlow Semi Condensed ExtraBold' },
 ];
 
 let done = false;

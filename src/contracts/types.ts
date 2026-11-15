@@ -137,7 +137,7 @@ export interface GameConfig {
   itemResolveMaxMs: number; // 12000 then prop closet
   lobbySettleMs: number; // 8000 (1000 in demo)
   lobbyMaxWaitMs: number; // 60000
-  dialTimeoutMs: number; // 45000
+  dialTimeoutMs: number; // 120000
   showItemMs: number; // 4000 (3000 in demo)
   drumrollMs: number; // 3000
   lightningDrumrollMs: number; // 2000
@@ -222,7 +222,7 @@ export interface StageState {
   mysteryOwner: string | null; // "MYSTERY ITEM from {owner}" card, round_start..guess_*
   liveTranscript: string | null; // fragment under the current guesser's podium
   banner: string | null; // "TEXT REMATCH TO PLAY AGAIN"
-  joinHint: string | null; // "Text {number}: I'm in, I'm {name}"
+  joinHint: string | null; // 'Text "I'm in, I'm [your name]" to (214) 555-0100'
   fallbackBadge: 'TEXT MODE' | 'NO CAMERA' | null;
   hostSpeaking: boolean; // the runner overrides this from VoicePort.onSpeakingChange
   lightning: boolean;

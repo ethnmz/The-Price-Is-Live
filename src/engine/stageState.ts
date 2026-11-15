@@ -145,8 +145,9 @@ function buildCaption(state: GameState): StageState['caption'] {
 
 function buildJoinHint(state: GameState, config: GameConfig): string | null {
   if (!JOIN_PHASES.includes(state.phase) || state.players.length >= 2) return null;
-  const rest = "I'm in, I'm {name}";
-  return config.lineDisplayNumber ? `Text ${config.lineDisplayNumber}: ${rest}` : `Text: ${rest}`;
+  // Shown on screen to people, so no template placeholders: "[your name]" reads as an instruction.
+  const msg = `"I'm in, I'm [your name]"`;
+  return config.lineDisplayNumber ? `Text ${msg} to ${config.lineDisplayNumber}` : `Text ${msg}`;
 }
 
 function buildBanner(phase: Phase): string | null {

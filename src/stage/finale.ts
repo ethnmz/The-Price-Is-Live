@@ -5,7 +5,8 @@
 // credit line and recap strip stay readable after video compression.
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
-import { COLORS, CREDIT_LINE, FONTS, SEAT_COLORS, STAGE, podiumXs, PODIUM_W, LAYOUT, type Box } from './theme';
+import { COLORS, CREDIT_LINE, FONTS, SEAT_COLORS, STAGE, podiumXs, PODIUM_W, LAYOUT, theme, type Box } from './theme';
+import { bevelBox, ribbon, sparkle, textFx } from './fx';
 
 // ---------- score fly ----------
 
@@ -66,8 +67,8 @@ export function drawScoreFly(ctx: SKRSContext2D, s: StageState, msSincePhase: nu
 export const FINALE_BOXES: Record<'banner' | 'board' | 'items' | 'credit', Box> = {
   banner: { x: STAGE.safeX, y: 40, w: STAGE.w - 2 * STAGE.safeX, h: 64 },
   board: { x: 180, y: 118, w: 600, h: 270 },
-  items: { x: STAGE.safeX, y: 428, w: STAGE.w - 2 * STAGE.safeX, h: 30 },
-  credit: { x: STAGE.safeX, y: 486, w: STAGE.w - 2 * STAGE.safeX, h: 22 },
+  items: { x: STAGE.safeX, y: 408, w: STAGE.w - 2 * STAGE.safeX, h: 40 },
+  credit: { x: STAGE.safeX, y: 470, w: STAGE.w - 2 * STAGE.safeX, h: 30 },
 };
 export const CREDIT_POS = { x: STAGE.w / 2, y: FINALE_BOXES.credit.y + FINALE_BOXES.credit.h / 2 };
 
@@ -112,7 +113,8 @@ function rng(seed: number): () => number {
   };
 }
 
-const CONFETTI_COLORS = [COLORS.gold, COLORS.alert, COLORS.green, COLORS.purple, COLORS.cream, SEAT_COLORS.p2, SEAT_COLORS.p3];
+// Read at draw time so the confetti follows the stage theme.
+const confettiColors = () => [COLORS.gold, COLORS.alert, COLORS.green, COLORS.purple, COLORS.cream, SEAT_COLORS.p2, SEAT_COLORS.p3];
 
 function drawConfetti(ctx: SKRSContext2D, ms: number): void {
   if (ms < 0 || ms > CONFETTI_MS) return;
@@ -125,7 +127,8 @@ function drawConfetti(ctx: SKRSContext2D, ms: number): void {
     const swayAmp = 10 + rand() * 30;
     const swayRate = 1 + rand() * 3;
     const size = 5 + rand() * 6;
-    const color = CONFETTI_COLORS[Math.floor(rand() * CONFETTI_COLORS.length)];
+    const palette = confettiColors();
+    const color = palette[Math.floor(rand() * palette.length)];
     const spin = rand() * Math.PI * 2;
     const t = (ms - delay) / 1000;
     if (t < 0) continue;
@@ -137,7 +140,19 @@ function drawConfetti(ctx: SKRSContext2D, ms: number): void {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(spin + t * swayRate * 2);
-    ctx.fillRect(-size / 2, -size / 4, size, size / 2);
+    if (theme() === 'odyssey') {
+      // laurel leaves and gold coins instead of paper confetti
+      if (i % 3 === 0) {
+        ctx.fillStyle = '#E8C97A';
+        ctx.beginPath(); ctx.ellipse(0, 0, size * 0.55, size * 0.55 * Math.abs(Math.cos(t * 4 + spin)), 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(-1, -size * 0.3, 2, 2);
+      } else {
+        ctx.fillStyle = i % 2 ? '#4E8C6A' : '#7FB089';
+        ctx.beginPath(); ctx.ellipse(0, 0, size * 0.7, size * 0.28, 0, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      ctx.fillRect(-size / 2, -size / 4, size, size / 2);
+    }
     ctx.restore();
   }
   ctx.restore();
@@ -146,19 +161,19 @@ function drawConfetti(ctx: SKRSContext2D, ms: number): void {
 function drawBanner(ctx: SKRSContext2D, s: StageState): void {
   const b = FINALE_BOXES.banner;
   const text = fitText(ctx, bannerText(s.finale!.champion), FONTS.title, 44, 16, b.w - 24);
+  const font = ctx.font;
   ctx.save();
-  ctx.fillStyle = COLORS.curtain;
+  // V2: a navy ribbon with gold trim, gold lettering and a glint
+  ribbon(ctx, { x: b.x + 26, y: b.y, w: b.w - 52, h: b.h }, COLORS.curtain, 26);
   ctx.strokeStyle = COLORS.gold;
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.roundRect(b.x, b.y, b.w, b.h, 14);
-  ctx.fill();
+  ctx.roundRect(b.x + 30, b.y + 4, b.w - 60, b.h - 8, 5);
   ctx.stroke();
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = COLORS.gold;
-  ctx.fillText(text, b.x + b.w / 2, b.y + b.h / 2 + 2);
+  textFx(ctx, text, b.x + b.w / 2, b.y + b.h / 2 + 2, { font, fill: 'gold', base: COLORS.gold, stroke: '#1A0F02', strokeW: 5, glow: 'rgba(255,210,120,0.7)', glowBlur: 14 });
   ctx.restore();
+  sparkle(ctx, b.x + b.w - 70, b.y + 14, 9, 0.9);
+  sparkle(ctx, b.x + 70, b.y + b.h - 12, 6, 0.7);
 }
 
 function drawBoard(ctx: SKRSContext2D, s: StageState, ms: number): void {
@@ -175,13 +190,16 @@ function drawBoard(ctx: SKRSContext2D, s: StageState, ms: number): void {
     const k = easeOut((ms - i * 80) / SLIDE_MS);
     const x = b.x - (1 - k) * (b.x + b.w);
     ctx.globalAlpha = k;
-    ctx.fillStyle = first ? COLORS.gold : COLORS.navy;
-    ctx.strokeStyle = first ? COLORS.cream : SEAT_COLORS[r.id];
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.roundRect(x, y, b.w, h, 12);
-    ctx.fill();
-    ctx.stroke();
+    // V2: each row is a lit, beveled plate; the winner's is gold with a glow
+    if (first) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,214,120,0.8)';
+      ctx.shadowBlur = 24;
+      bevelBox(ctx, { x, y, w: b.w, h }, COLORS.gold, { r: 12, gloss: 0.35, stroke: COLORS.cream, strokeW: 3 });
+      ctx.restore();
+    } else {
+      bevelBox(ctx, { x, y, w: b.w, h }, COLORS.navy, { r: 12, shadow: 10, gloss: 0.12, stroke: SEAT_COLORS[r.id], strokeW: 3 });
+    }
     const textColor = first ? COLORS.ink : COLORS.cream;
     const px = first ? 34 : 26;
     ctx.textBaseline = 'middle';
@@ -216,7 +234,7 @@ function drawItemsStrip(ctx: SKRSContext2D, s: StageState): void {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = COLORS.cream;
-  const text = fitText(ctx, items.join(' · '), FONTS.body, 18, 11, b.w - 30);
+  const text = fitText(ctx, items.join(' · '), FONTS.body, 22, 15, b.w - 36);
   ctx.fillText(text, b.x + b.w / 2, b.y + b.h / 2 + 1);
   ctx.restore();
 }
@@ -226,9 +244,14 @@ function drawCredit(ctx: SKRSContext2D): void {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const b = FINALE_BOXES.credit;
-  fitFont(ctx, CREDIT_LINE, FONTS.body, 14, 9, b.w);
-  ctx.fillStyle = COLORS.cream;
-  ctx.fillText(CREDIT_LINE, CREDIT_POS.x, CREDIT_POS.y);
+  fitFont(ctx, CREDIT_LINE, FONTS.body, 20, 12, b.w - 40);
+  const w = ctx.measureText(CREDIT_LINE).width + 36;
+  ctx.fillStyle = 'rgba(20,18,58,0.85)';
+  ctx.beginPath();
+  ctx.roundRect(CREDIT_POS.x - w / 2, b.y, w, b.h, b.h / 2);
+  ctx.fill();
+  ctx.fillStyle = COLORS.gold;
+  ctx.fillText(CREDIT_LINE, CREDIT_POS.x, CREDIT_POS.y + 1);
   ctx.restore();
 }
 
@@ -237,7 +260,7 @@ export function drawFinale(ctx: SKRSContext2D, s: StageState, msSincePhase: numb
   const ms = Math.max(0, msSincePhase);
   ctx.save();
   ctx.globalAlpha = 1;
-  ctx.fillStyle = `rgba(10,8,30,${0.72 * Math.min(1, ms / 300)})`;
+  ctx.fillStyle = `rgba(10,8,30,${0.82 * Math.min(1, ms / 300)})`;
   ctx.fillRect(0, 0, STAGE.w, STAGE.h);
   drawConfetti(ctx, ms);
   drawBanner(ctx, s);

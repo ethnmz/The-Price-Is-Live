@@ -5,6 +5,7 @@
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
 import { COLORS, FONTS, LAYOUT, STAGE } from './theme';
+import { shade, sparkle } from './fx';
 
 type Timer = NonNullable<StageState['timer']>;
 type Reveal = NonNullable<StageState['reveal']>;
@@ -14,9 +15,11 @@ const RING_W = 14;
 const RED_AT = 4;
 const POP_MS = 500;
 const SAFE_W = STAGE.w - 2 * STAGE.safeX; // 864
-const PRICE_CY = 215;
-const NAME_Y = 305;
-const SOURCE_Y = 342;
+const PRICE_CY = 228;
+const NAME_Y = 316;
+const SOURCE_Y = 350;
+/** The price pops to 1.25x; size it so even the peak stays inside the safe area. */
+const PRICE_MAX_W = Math.floor(SAFE_W / 1.25);
 
 /** Seconds left now (a fraction), clamped at 0. Counts down only while the timer is running. */
 export function timerSecondsLeft(timer: Timer, msSinceSet: number): number {
@@ -75,10 +78,27 @@ export function drawTimerRing(ctx: SKRSContext2D, timer: Timer, msSinceSet: numb
 
   ctx.save();
   ctx.lineCap = 'butt';
+  // V2: a dark glass dial with a beveled rim behind the track
+  const dial = ctx.createRadialGradient(cx, cy - 20, 10, cx, cy, RING_R + 14);
+  dial.addColorStop(0, 'rgba(26,58,82,0.85)');
+  dial.addColorStop(1, 'rgba(6,20,34,0.92)');
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 14;
+  ctx.beginPath();
+  ctx.arc(cx, cy, RING_R + RING_W / 2 + 6, 0, Math.PI * 2);
+  ctx.fillStyle = dial;
+  ctx.fill();
+  ctx.restore();
+  ctx.beginPath();
+  ctx.arc(cx, cy, RING_R + RING_W / 2 + 6, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(232,201,122,0.55)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
   // dark track
   ctx.beginPath();
   ctx.arc(cx, cy, RING_R, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(20,18,58,0.75)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
   ctx.lineWidth = RING_W + 6;
   ctx.stroke();
   // the remaining arc: the empty part grows clockwise from 12 o'clock
@@ -86,9 +106,15 @@ export function drawTimerRing(ctx: SKRSContext2D, timer: Timer, msSinceSet: numb
     const start = -Math.PI / 2 + Math.PI * 2 * (1 - frac);
     ctx.beginPath();
     ctx.arc(cx, cy, RING_R, start, -Math.PI / 2 + Math.PI * 2);
-    ctx.strokeStyle = red ? COLORS.alert : COLORS.cream;
+    const arcGrad = ctx.createLinearGradient(cx, cy - RING_R, cx, cy + RING_R);
+    arcGrad.addColorStop(0, red ? '#FF9A7A' : '#FFFDF4');
+    arcGrad.addColorStop(0.35, red ? COLORS.alert : COLORS.cream);
+    arcGrad.addColorStop(0.75, red ? COLORS.alert : COLORS.cream);
+    arcGrad.addColorStop(1, red ? shade(COLORS.alert, -0.2) : COLORS.gold);
+    ctx.strokeStyle = arcGrad;
     ctx.lineWidth = RING_W + pulse * 4;
-    if (red) { ctx.shadowColor = COLORS.alert; ctx.shadowBlur = 8 + pulse * 14; }
+    ctx.shadowColor = red ? COLORS.alert : 'rgba(232,201,122,0.8)';
+    ctx.shadowBlur = red ? 8 + pulse * 14 : 10;
     ctx.stroke();
   }
   // flash at zero
@@ -182,7 +208,7 @@ interface Rect { x: number; y: number; w: number; h: number }
 
 /** The rectangle the price digits occupy once fully popped (measured with the fitted font). */
 export function priceTextBox(ctx: SKRSContext2D, reveal: Pick<Reveal, 'priceText'>): Rect {
-  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, SAFE_W);
+  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, PRICE_MAX_W);
   ctx.save();
   ctx.font = `${px}px ${FONTS.title}`;
   const w = ctx.measureText(reveal.priceText).width;
@@ -191,7 +217,7 @@ export function priceTextBox(ctx: SKRSContext2D, reveal: Pick<Reveal, 'priceText
   return { x: STAGE.w / 2 - w / 2, y: PRICE_CY - h / 2, w, h };
 }
 
-const STAMP = { cx: 770, cy: 108, w: 200, h: 46, angle: (-8 * Math.PI) / 180 };
+const STAMP = { cx: 770, cy: 118, w: 200, h: 46, angle: (-8 * Math.PI) / 180 };
 
 /** Bounding box of the (rotated) ESTIMATE stamp. It sits above-right of the price. */
 export function estimateStampBox(): Rect {
@@ -211,7 +237,11 @@ function drawStarburst(ctx: SKRSContext2D, ms: number, scale: number): void {
   for (let i = 0; i < rays; i++) {
     const a = (i / rays) * Math.PI * 2;
     const half = Math.PI / rays / 1.6;
-    ctx.fillStyle = i % 2 ? 'rgba(255,200,61,0.28)' : 'rgba(255,244,214,0.18)';
+    // V2: rays fade out from the center, so the burst reads as light rather than flat wedges
+    const ray = ctx.createRadialGradient(0, 0, 20, 0, 0, len);
+    ray.addColorStop(0, i % 2 ? 'rgba(255,214,120,0.55)' : 'rgba(255,248,225,0.4)');
+    ray.addColorStop(1, 'rgba(255,214,120,0)');
+    ctx.fillStyle = ray;
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(Math.cos(a - half) * len, Math.sin(a - half) * len);
@@ -233,20 +263,42 @@ function ellipsize(ctx: SKRSContext2D, text: string, maxWidth: number): string {
 function drawPrice(ctx: SKRSContext2D, reveal: Reveal, ms: number): void {
   const scale = popScale(ms);
   const cx = STAGE.w / 2;
-  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, SAFE_W);
+  const px = fitFontPx(ctx, reveal.priceText, FONTS.title, 150, PRICE_MAX_W);
   ctx.save();
   ctx.translate(cx, PRICE_CY);
   ctx.scale(scale, scale);
+  // V2: molten-gold numerals: a deep outline, a warm glow and a metal gradient, then a top sheen
   ctx.font = `${px}px ${FONTS.title}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round';
-  ctx.lineWidth = Math.max(6, px / 12);
-  ctx.strokeStyle = '#000';
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillText(reveal.priceText, 3, 7);
+  ctx.shadowColor = 'rgba(255,200,110,0.9)';
+  ctx.shadowBlur = 26;
+  ctx.lineWidth = Math.max(8, px / 9);
+  ctx.strokeStyle = '#2A1A06';
   ctx.strokeText(reveal.priceText, 0, 0);
-  ctx.fillStyle = COLORS.gold;
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = Math.max(3, px / 30);
+  ctx.strokeStyle = '#7C5A1E';
+  ctx.strokeText(reveal.priceText, 0, 0);
+  const metal = ctx.createLinearGradient(0, -px * 0.42, 0, px * 0.42);
+  metal.addColorStop(0, '#FFF6D2');
+  metal.addColorStop(0.35, '#F4D27A');
+  metal.addColorStop(0.55, '#C8962E');
+  metal.addColorStop(1, '#F0C76A');
+  ctx.fillStyle = metal;
   ctx.fillText(reveal.priceText, 0, 0);
   ctx.restore();
+  // sparkles that pop around the price as it lands
+  const box = priceTextBox(ctx, reveal);
+  for (let i = 0; i < 9; i++) {
+    const life = ((ms + i * 170) % 1100) / 1100;
+    const sx = box.x + ((i * 97) % 100) / 100 * box.w;
+    const sy = box.y + (((i * 53) % 100) / 100) * box.h;
+    sparkle(ctx, sx, sy, 5 + 9 * Math.sin(life * Math.PI), Math.sin(life * Math.PI) * clamp01(ms / 300));
+  }
 
   // item name and source appear once the price has mostly landed
   const fade = clamp01((ms - 200) / 250);
@@ -266,13 +318,16 @@ function drawPrice(ctx: SKRSContext2D, reveal: Reveal, ms: number): void {
     ctx.fillText(name, cx, NAME_Y);
   }
   if (reveal.sourceLabel) {
-    ctx.font = `20px ${FONTS.body}`;
-    const src = ellipsize(ctx, reveal.sourceLabel, SAFE_W);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = COLORS.ink;
-    ctx.strokeText(src, cx, SOURCE_Y);
-    ctx.fillStyle = COLORS.gray;
-    ctx.fillText(src, cx, SOURCE_Y);
+    // A dark pill keeps the source readable on top of the starburst.
+    ctx.font = `22px ${FONTS.body}`;
+    const src = ellipsize(ctx, reveal.sourceLabel, SAFE_W - 40);
+    const w = ctx.measureText(src).width + 32;
+    ctx.fillStyle = 'rgba(20,18,58,0.85)';
+    ctx.beginPath();
+    ctx.roundRect(cx - w / 2, SOURCE_Y - 16, w, 32, 16);
+    ctx.fill();
+    ctx.fillStyle = COLORS.cream;
+    ctx.fillText(src, cx, SOURCE_Y + 1);
   }
   ctx.restore();
 
@@ -308,6 +363,12 @@ export function drawReveal(ctx: SKRSContext2D, reveal: Reveal, msSinceStage: num
   if (reveal.stage === 'drumroll') {
     drawDrumroll(ctx, ms, lightning);
   } else {
+    // Dim everything above the podiums so the price doesn't fight the host and the name pills.
+    // The podiums stay bright: they show everyone's guesses next to the real price.
+    ctx.save();
+    ctx.fillStyle = `rgba(14,12,40,${0.78 * clamp01(ms / 150)})`;
+    ctx.fillRect(0, 0, STAGE.w, LAYOUT.podiums.y);
+    ctx.restore();
     drawStarburst(ctx, ms, popScale(ms));
     drawPrice(ctx, reveal, ms);
     if (ms < 60) {

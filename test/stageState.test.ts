@@ -163,8 +163,8 @@ describe('timer math', () => {
 describe('join hint, badge and cap clock', () => {
   it('join hint with and without a number', () => {
     const lobby = state('lobby', 4, { players: fixturePlayers(2).slice(0, 1) });
-    expect(buildStageState(lobby, NOW, config).joinHint).toBe("Text (214) 555-0100: I'm in, I'm {name}");
-    expect(buildStageState(lobby, NOW, gameConfig()).joinHint).toBe("Text: I'm in, I'm {name}");
+    expect(buildStageState(lobby, NOW, config).joinHint).toBe(`Text "I'm in, I'm [your name]" to (214) 555-0100`);
+    expect(buildStageState(lobby, NOW, gameConfig()).joinHint).toBe(`Text "I'm in, I'm [your name]"`);
     expect(buildStageState(state('lobby', 2), NOW, config).joinHint).toBeNull();
     expect(buildStageState(state('rules', 4, { players: fixturePlayers(2).slice(0, 1) }), NOW, config).joinHint).toBeNull();
   });

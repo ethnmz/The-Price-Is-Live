@@ -2,7 +2,7 @@
 // Captions carry the game when audio is silent, so they must always fit in CAPTION.maxLines lines.
 // TO VERIFY ON THE REAL LINE: the 65 ms per character pace is an estimate of Chip's voice; tune it
 // against the real ElevenLabs speech rate.
-import { CAPTION, COLORS, FONTS, LAYOUT } from './theme';
+import { CAPTION, COLORS, FONTS, LAYOUT, theme } from './theme';
 
 type Ctx = import('@napi-rs/canvas').SKRSContext2D;
 
@@ -115,17 +115,46 @@ export function drawCaption(
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  const odyssey = theme() === 'odyssey';
+  // V2: a glass panel (gradient + top sheen + soft shadow) with a thin gold frame in odyssey
+  // No drop shadow: the caption must never paint outside its box (other layers sit right next to it).
+  ctx.save();
+  const glass = ctx.createLinearGradient(0, box.y, 0, box.y + box.h);
+  glass.addColorStop(0, odyssey ? 'rgba(26,58,82,0.92)' : 'rgba(30,30,40,0.82)');
+  glass.addColorStop(1, odyssey ? 'rgba(6,24,40,0.94)' : 'rgba(0,0,0,0.82)');
+  ctx.fillStyle = glass;
   roundRect(ctx, box.x, box.y, box.w, box.h, 14);
   ctx.fill();
+  ctx.restore();
+  ctx.save();
+  roundRect(ctx, box.x, box.y, box.w, box.h, 14);
+  ctx.clip();
+  const sheen = ctx.createLinearGradient(0, box.y, 0, box.y + box.h * 0.5);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.10)');
+  sheen.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sheen;
+  ctx.fillRect(box.x, box.y, box.w, box.h * 0.5);
+  ctx.restore();
+  ctx.strokeStyle = odyssey ? 'rgba(232,201,122,0.7)' : 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, box.x + 4, box.y + 4, box.w - 8, box.h - 8, 11);
+  ctx.stroke();
 
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   let textX = box.x + PAD_X;
   if (host) {
+    // the speaker tag sits in a small gold pill
     ctx.font = bodyFont(CAPTION.tagPx);
-    ctx.fillStyle = COLORS.gold;
-    ctx.fillText('CHIP:', textX, box.y + box.h / 2);
+    const tw = ctx.measureText('CHIP:').width;
+    const tag = ctx.createLinearGradient(0, box.y + box.h / 2 - 12, 0, box.y + box.h / 2 + 12);
+    tag.addColorStop(0, '#F6DE9C');
+    tag.addColorStop(1, '#B98E36');
+    ctx.fillStyle = tag;
+    roundRect(ctx, textX - 6, box.y + box.h / 2 - 12, tw + 12, 24, 12);
+    ctx.fill();
+    ctx.fillStyle = COLORS.ink;
+    ctx.fillText('CHIP:', textX, box.y + box.h / 2 + 1);
     textX += ctx.measureText('CHIP:').width + TAG_GAP;
   } else {
     textX += 0;

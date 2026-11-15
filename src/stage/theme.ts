@@ -23,6 +23,55 @@ export const FONTS = {
   body: '"Lilita One", "Nunito", "Arial Rounded MT Bold", "Arial", sans-serif',
 };
 
+// ---------- themes ----------
+// The stage has one look per theme. COLORS, SEAT_COLORS and FONTS are switched in place, so every
+// layer that reads them at draw time follows the theme; layers with a themed shape check `theme()`.
+export type ThemeName = 'classic' | 'odyssey';
+
+const CLASSIC = { colors: { ...COLORS }, seats: { ...SEAT_COLORS }, fonts: { ...FONTS } };
+
+/**
+ * Odyssey: HackUTA 2026's sea-voyage look (navy sea and sky, parchment, muted gold, terracotta).
+ * Inspired by the event site's palette and fonts; the art is drawn here, nothing is copied from it.
+ */
+const ODYSSEY = {
+  colors: {
+    navy: '#102F46', // deep sky and sea
+    curtain: '#1A3A52', // banner and panel fill (was curtain red)
+    gold: '#E8C97A',
+    cream: '#F6EDDF', // parchment
+    bulb: '#F3DFA6',
+    ink: '#0B2236',
+    alert: '#C45C3E', // terracotta
+    green: '#4E9A6B', // olive green
+    purple: '#3E7CA6', // slate blue (the "?" box)
+    gray: '#8FA3B3',
+  },
+  seats: { p1: '#C45C3E', p2: '#3E7CA6', p3: '#4E8C6A', p4: '#B8862F' } as Record<PlayerId, string>,
+  fonts: {
+    title: '"Cinzel", "Trajan Pro", "Georgia", serif',
+    body: '"Barlow Semi Condensed", "Arial Narrow", "Arial", sans-serif',
+  },
+};
+
+let current: ThemeName = 'classic';
+
+/** Which theme is active. */
+export function theme(): ThemeName {
+  return current;
+}
+
+/** Switch the stage's look. Unknown names fall back to classic. */
+export function applyTheme(name: string | undefined): ThemeName {
+  const t: ThemeName = name === 'odyssey' ? 'odyssey' : 'classic';
+  const src = t === 'odyssey' ? ODYSSEY : CLASSIC;
+  Object.assign(COLORS, src.colors);
+  Object.assign(SEAT_COLORS, src.seats);
+  Object.assign(FONTS, src.fonts);
+  current = t;
+  return t;
+}
+
 export interface Box { x: number; y: number; w: number; h: number }
 
 export const STAGE = { w: 960, h: 540, safeX: 48, safeY: 27 };
@@ -31,19 +80,20 @@ export const LAYOUT: Record<string, Box> = {
   marquee: { x: 280, y: 10, w: 400, h: 50 },
   roundLabel: { x: 40, y: 18, w: 220, h: 34 },
   callClock: { x: 700, y: 18, w: 220, h: 34 },
-  turnStrip: { x: 200, y: 66, w: 560, h: 30 },
-  joinHint: { x: 180, y: 100, w: 600, h: 40 },
+  turnStrip: { x: 180, y: 62, w: 600, h: 36 },
+  joinHint: { x: 130, y: 104, w: 700, h: 44 },
   host: { x: 330, y: 100, w: 300, h: 250 },
   mysteryCard: { x: 40, y: 120, w: 250, h: 190 },
   timerRing: { x: 680, y: 120, w: 240, h: 190 },
   caption: { x: 60, y: 360, w: 840, h: 70 },
-  banner: { x: 120, y: 400, w: 720, h: 40 },
+  // Sits just above the caption so the two never overlap (they used to share y 400-430).
+  banner: { x: 150, y: 312, w: 660, h: 40 },
   badge: { x: 780, y: 60, w: 160, h: 28 },
   podiums: { x: 48, y: 440, w: 864, h: 100 },
 };
 
 export const PODIUM_W = 190;
-export const CAPTION = { fontPx: 28, maxLines: 2, tagPx: 16, holdMs: 1500 };
+export const CAPTION = { fontPx: 28, maxLines: 2, tagPx: 18, holdMs: 1500 };
 
 /** Left x of each podium for 2, 3 or 4 players: equal spacing across the podium row. */
 export function podiumXs(count: number): number[] {

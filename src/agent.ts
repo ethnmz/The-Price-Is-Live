@@ -43,7 +43,7 @@ export function makeTts(env: Env): Tts {
 function makeChert(env: Env): ChertClient {
   return createChertClient({
     apiKey: env.chertApiKey, projectId: env.chertProjectId, lineId: env.chertLineId,
-    facetimeBase: env.chertFacetimeBase, appBase: env.chertAppBase,
+    facetimeBase: env.chertFacetimeBase, appBase: env.chertAppBase, roster: env.playerPhones,
   });
 }
 

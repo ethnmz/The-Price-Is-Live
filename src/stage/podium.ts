@@ -1,7 +1,8 @@
 // Podiums along the bottom row: seat-color body, name plate, score, guess chip, role decorations.
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import type { StageState } from '../contracts/types';
-import { COLORS, FONTS, LAYOUT, PODIUM_W, SEAT_COLORS, podiumXs, type Box } from './theme';
+import { COLORS, FONTS, LAYOUT, PODIUM_W, SEAT_COLORS, STAGE, podiumXs, theme, type Box } from './theme';
+import { bevelBox, goldGradient, insetBox, shade, textFx } from './fx';
 
 type Podium = StageState['podiums'][number];
 
@@ -73,17 +74,29 @@ function drawOne(ctx: SKRSContext2D, p: Podium, box: Box, nowMs: number, transcr
     ctx.closePath();
     ctx.fill();
   }
-  if (p.role === 'owner') {
-    ctx.shadowColor = COLORS.gold;
-    ctx.shadowBlur = 18;
-  }
-  // body
+  // body: a lit, beveled block (V2), with a gold glow for the item's owner
   const body = { x: box.x, y: box.y + 14, w: box.w, h: box.h - 14 };
-  rr(ctx, body.x, body.y, body.w, body.h, 10);
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.shadowColor = 'transparent';
+  if (p.role === 'owner') {
+    ctx.save();
+    ctx.shadowColor = COLORS.gold;
+    ctx.shadowBlur = 22;
+    rr(ctx, body.x, body.y, body.w, body.h, 10);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+  }
+  bevelBox(ctx, body, color, { r: 10, shadow: 14, gloss: 0.16 });
+  if (theme() === 'odyssey') {
+    // a gold capital band across the top, like the head of a column
+    ctx.save();
+    rr(ctx, body.x, body.y, body.w, body.h, 10);
+    ctx.clip();
+    ctx.fillStyle = goldGradient(ctx, body.y, body.y + 7, '#C9A24A');
+    ctx.fillRect(body.x, body.y, body.w, 7);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(body.x, body.y + 7, body.w, 1.5);
+    ctx.restore();
+  }
   if (over) { rr(ctx, body.x, body.y, body.w, body.h, 10); ctx.fillStyle = 'rgba(230,57,70,0.35)'; ctx.fill(); }
   if (p.role === 'guesser') {
     const pulse = 3 + 2 * Math.sin(nowMs / 200);
@@ -97,47 +110,45 @@ function drawOne(ctx: SKRSContext2D, p: Podium, box: Box, nowMs: number, transcr
     ctx.strokeStyle = COLORS.gold;
     ctx.stroke();
   }
-  // name plate
-  const plate = { x: box.x + 10, y: box.y + 20, w: box.w - 20, h: 26 };
-  rr(ctx, plate.x, plate.y, plate.w, plate.h, 6);
-  ctx.fillStyle = COLORS.ink;
-  ctx.fill();
+  // name plate: a sunken screen
+  const plate = { x: box.x + 10, y: box.y + 22, w: box.w - 20, h: 25 };
+  insetBox(ctx, plate, COLORS.ink, 6);
   const px = fitNameFont(ctx, p.name, plate.w - 12);
   ctx.font = `${px}px ${FONTS.body}`;
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(p.name, plate.x + plate.w / 2, plate.y + plate.h / 2 + 1);
-  // score
-  ctx.font = `24px ${FONTS.title}`;
-  ctx.fillStyle = '#fff';
-  ctx.fillText(String(p.score), box.x + box.w / 2, box.y + 62, box.w - 20);
+  // score: embossed white numerals with a soft drop shadow
+  textFx(ctx, String(p.score), box.x + box.w / 2, box.y + 63, {
+    font: `27px ${FONTS.title}`, fill: '#FFFFFF', stroke: shade(color, -0.55), strokeW: 4, drop: 2, maxW: box.w - 20,
+  });
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   // guess chip
   const chip = chipStyle(p);
   if (chip) {
-    const c = { x: box.x + 30, y: box.y + 74, w: box.w - 60, h: 22 };
-    rr(ctx, c.x, c.y, c.w, c.h, 11);
-    ctx.fillStyle = chip.fill;
-    ctx.fill();
-    ctx.font = `16px ${FONTS.body}`;
+    const c = { x: box.x + 16, y: box.y + 76, w: box.w - 32, h: 22 };
+    bevelBox(ctx, c, chip.fill, { r: 11, gloss: 0.3, strokeW: 1.5 });
+    ctx.font = `19px ${FONTS.body}`;
     ctx.fillStyle = chip.color;
     ctx.fillText(chip.text, c.x + c.w / 2, c.y + c.h / 2 + 1, c.w - 8);
   }
   if (p.role === 'owner') {
-    const tag = { x: box.x + box.w - 62, y: box.y + 4, w: 56, h: 16 };
-    rr(ctx, tag.x, tag.y, tag.w, tag.h, 8);
-    ctx.fillStyle = COLORS.gold;
-    ctx.fill();
-    ctx.font = `11px ${FONTS.title}`;
+    const tag = { x: box.x + box.w - 84, y: box.y, w: 78, h: 20 };
+    bevelBox(ctx, tag, COLORS.gold, { r: 10, shadow: 6, gloss: 0.35, strokeW: 1.5 });
+    ctx.font = `14px ${FONTS.title}`;
     ctx.fillStyle = COLORS.ink;
     ctx.fillText('OWNER', tag.x + tag.w / 2, tag.y + tag.h / 2 + 1);
   }
   if (p.role === 'winner') drawCrown(ctx, box.x + box.w / 2, box.y - 12);
   if (transcript) {
-    ctx.font = `18px ${FONTS.body}`;
-    const w = Math.min(box.w + 40, ctx.measureText(transcript).width + 24);
-    const t = { x: box.x + box.w / 2 - w / 2, y: box.y - 34, w, h: 26 };
-    rr(ctx, t.x, t.y, t.w, t.h, 13);
+    // Above the caption bar (y 360-430), so the two never overlap.
+    ctx.font = `22px ${FONTS.body}`;
+    const w = Math.min(box.w + 60, ctx.measureText(transcript).width + 28);
+    const cx = Math.min(STAGE.w - STAGE.safeX - w / 2, Math.max(STAGE.safeX + w / 2, box.x + box.w / 2));
+    const t = { x: cx - w / 2, y: LAYOUT.caption.y - 38, w, h: 32 };
+    rr(ctx, t.x, t.y, t.w, t.h, 16);
     ctx.fillStyle = 'rgba(255,244,214,0.92)';
     ctx.fill();
     ctx.fillStyle = COLORS.ink;
