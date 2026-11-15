@@ -22,6 +22,7 @@ export type Next =
 
 /** Fields only the engine reads. Other lanes only see GameState. */
 export interface EnginePrivate {
+  windowSpeechSeen: boolean;
   bootAt: number;
   speakQueue: { key: HostLineKey; vars?: Record<string, string | number> }[];
   speakingId: string | null;
@@ -44,7 +45,7 @@ export type EngineState = GameState & EnginePrivate;
 
 export function freshPrivate(): EnginePrivate {
   return {
-    bootAt: 0, speakQueue: [], speakingId: null, afterSpeech: null, speakSeq: 0, timerSeq: 0, textSeq: 0,
+    windowSpeechSeen: false, bootAt: 0, speakQueue: [], speakingId: null, afterSpeech: null, speakSeq: 0, timerSeq: 0, textSeq: 0,
     timers: {}, listenOpen: false, dialAttempts: 0, nudged: false, guessCorrected: false, listenLeftMs: 0,
     earlyPrices: {}, earlyFailed: {}, finishedRoster: false,
   };
