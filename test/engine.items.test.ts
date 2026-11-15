@@ -77,22 +77,18 @@ describe('item camera and voice fallbacks', () => {
     expect(g.state.phase).toBe('show_item');
   });
 
-  it('offers voice after camera silence and keeps the original 12-second deadline', () => {
+  it('uses the prop closet after camera silence at itemWaitMs', () => {
     const g = game();
     const entered = g.state.phaseEnteredAt;
     g.fire('itemwait');
     expect(g.state.now - entered).toBe(6000);
-    expect(g.state.phase).toBe('item_resolve');
-    expect(g.effects).toContainEqual(expect.objectContaining({ type: 'SPEAK', key: 'item.ask' }));
-    expect(g.effects.at(-1)).toEqual({ type: 'LISTEN', on: true });
+    expect(g.state.phase).toBe('show_item');
+    expect(g.effects).toContainEqual(expect.objectContaining({ type: 'SPEAK', key: 'item.propcloset' }));
+    expect(g.state.currentItem?.request.origin).toBe('prop_closet');
     const before = g.state;
     g.send({ type: 'FRAME_ID_READY', itemId: 'r1', label: 'Late bottle', confidence: 1 });
     expect(g.state).toBe(before);
     expect(requests(g.effects)).toEqual([]);
-    g.fire('itemmax');
-    expect(g.state.now - entered).toBe(12000);
-    expect(g.state.phase).toBe('show_item');
-    expect(g.state.currentItem?.request.origin).toBe('prop_closet');
     expect([...g.timers.keys()].some(id => /^(item|price)/.test(id))).toBe(false);
   });
 
