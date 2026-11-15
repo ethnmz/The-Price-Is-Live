@@ -185,18 +185,20 @@ describe('automatic TEXT MODE', () => {
     expect(g.s.textMode).toBe(false);
   });
 
-  it('preserves state for an unparseable final and resets the streak for a guess', () => {
+  it('resets the streak on an unparseable final without a preceding partial', () => {
     const g = game();
     g.fire('show'); g.fire('guess');
-    const before = g.s;
+    const before = structuredClone(g.s);
     const fx = g.send({ type: 'SPEECH_FINAL', text: 'hmm let me think', confidence: 1 });
-    expect(g.s).toBe(before);
-    expect(fx).toEqual([expect.objectContaining({ type: 'LOG', level: 'info' })]);
-    expect(g.s.silentWindows).toBe(1);
-    g.send({ type: 'SPEECH_FINAL', text: '10', confidence: 1 });
+    expect(g.s.windowSpeechSeen).toBe(true);
     expect(g.s.silentWindows).toBe(0);
-    g.settle();
-    g.fire('confirm');
+    expect(before.windowSpeechSeen).toBe(false);
+    expect(before.silentWindows).toBe(1);
+    expect(g.s.pendingGuess).toBeNull();
+    expect(fx).toEqual([expect.objectContaining({ type: 'LOG', level: 'info' })]);
+    g.fire('guess');
+    expect(g.s.silentWindows).toBe(0);
     expect(g.s.textMode).toBe(false);
+    expect(g.keys()).not.toContain('guess.textmode');
   });
 });

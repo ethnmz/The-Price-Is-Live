@@ -37,9 +37,9 @@ export const reduce: Reduce = (state, event, deps) => {
       s.silentWindows = 0;
     }
     dispatch(c, event);
-    // Ignored finals preserve state identity, including the silence bookkeeping.
-    // Accepted partials still prove the audio path is alive without an amount.
-    if (c.ignored) return { state, effects: [ignoredLog(state, event, c.ignored)] };
+    // Speech proves the audio path is alive even when it contains no guess.
+    // Events outside an open guess window still preserve ignored-state identity.
+    if (c.ignored) return { state: speechInWindow ? s : state, effects: [ignoredLog(state, event, c.ignored)] };
     return { state: s, effects: c.fx };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
