@@ -406,96 +406,69 @@ function hair(ctx: Ctx): void {
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,230,200,0.35)';
-  ctx.lineWidth = 2;
-  for (const [x0, y0, x1, y1] of [[-24, -44, 8, -54], [-12, -38, 20, -48], [0, -32, 30, -40]] as const) {
-    ctx.beginPath();
-    ctx.moveTo(CX + x0, HEAD_Y + y0);
-    ctx.quadraticCurveTo(CX + (x0 + x1) / 2, HEAD_Y + Math.min(y0, y1) - 6, CX + x1, HEAD_Y + y1);
-    ctx.stroke();
-  }
+  ctx.strokeStyle = 'rgba(255,230,200,0.3)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(CX - 16, HEAD_Y - 46);
+  ctx.quadraticCurveTo(CX, HEAD_Y - 54, CX + 16, HEAD_Y - 48);
+  ctx.stroke();
 }
 
 function eyes(ctx: Ctx, blink: boolean): void {
+  // Simple cartoon eyes: a dark oval with one highlight (V2.1: less detail, friendlier).
   const y = HEAD_Y - 2;
   ctx.lineCap = 'round';
   for (const s of [-1, 1]) {
-    const x = CX + s * 15;
+    const x = CX + s * 14;
     if (blink) {
       ctx.strokeStyle = outline();
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(x - 7, y + 1);
-      ctx.quadraticCurveTo(x, y + 4, x + 7, y + 1);
+      ctx.moveTo(x - 6, y + 1);
+      ctx.quadraticCurveTo(x, y + 4, x + 6, y + 1);
       ctx.stroke();
       continue;
     }
-    ctx.fillStyle = '#FFFFFF';
-    ctx.strokeStyle = outline();
-    ctx.lineWidth = 2;
+    ctx.fillStyle = '#1B1410';
     ctx.beginPath();
-    ctx.ellipse(x, y, 7.5, 9, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    const iris = ctx.createRadialGradient(x, y + 1, 0, x, y + 1, 5.5);
-    iris.addColorStop(0, '#7A4A22');
-    iris.addColorStop(1, '#3B2210');
-    ctx.fillStyle = iris;
-    ctx.beginPath();
-    ctx.arc(x, y + 1.5, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#120804';
-    ctx.beginPath();
-    ctx.arc(x, y + 1.5, 2.4, 0, Math.PI * 2);
+    ctx.ellipse(x, y, 5, 7, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.arc(x - 2, y - 1, 1.6, 0, Math.PI * 2);
+    ctx.arc(x - 1.6, y - 2.6, 1.8, 0, Math.PI * 2);
     ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x + 1.8, y + 3.2, 0.8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = outline();
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.ellipse(x, y, 8, 9.5, 0, Math.PI * 1.1, Math.PI * 1.9);
-    ctx.stroke();
   }
 }
 
 function drawMouth(ctx: Ctx, mouth: MouthShape): void {
+  // Simple mouth: a smile line when closed; a plain rounded opening with a small tongue when talking.
   const x = CX;
   const y = HEAD_Y + 22;
   ctx.strokeStyle = outline();
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 3;
   ctx.lineCap = 'round';
   if (mouth === 'closed') {
     ctx.beginPath();
-    ctx.moveTo(x - 13, y - 2);
-    ctx.quadraticCurveTo(x, y + 9, x + 13, y - 2);
+    ctx.moveTo(x - 12, y - 2);
+    ctx.quadraticCurveTo(x, y + 8, x + 12, y - 2);
     ctx.stroke();
-    ctx.lineWidth = 1.5;
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x + s * 13, y - 4); ctx.lineTo(x + s * 15, y); ctx.stroke(); }
     return;
   }
-  const w = mouth === 'half' ? 13 : 18;
-  const h = mouth === 'half' ? 9 : 16;
-  ctx.fillStyle = '#3A0E0A';
+  const w = mouth === 'half' ? 10 : 14;
+  const h = mouth === 'half' ? 8 : 14;
+  ctx.fillStyle = '#4A1612';
   ctx.beginPath();
-  ctx.moveTo(x - w, y - 4);
-  ctx.quadraticCurveTo(x, y - 2, x + w, y - 4);
-  ctx.quadraticCurveTo(x + w - 2, y + h, x, y + h);
-  ctx.quadraticCurveTo(x - w + 2, y + h, x - w, y - 4);
+  ctx.moveTo(x - w, y - 3);
+  ctx.quadraticCurveTo(x, y - 1, x + w, y - 3);
+  ctx.quadraticCurveTo(x + w, y + h, x, y + h);
+  ctx.quadraticCurveTo(x - w, y + h, x - w, y - 3);
   ctx.closePath();
   ctx.fill();
-  ctx.stroke();
   ctx.save();
   ctx.clip();
-  ctx.fillStyle = '#FFFDF6'; // teeth
-  ctx.fillRect(x - w, y - 5, w * 2, 5);
-  ctx.fillStyle = '#D0574A'; // tongue
+  ctx.fillStyle = '#D9665A';
   ctx.beginPath();
-  ctx.ellipse(x, y + h, w * 0.6, h * 0.45, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y + h, w * 0.65, h * 0.5, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -527,7 +500,7 @@ function head(ctx: Ctx, mouth: MouthShape, blink: boolean): void {
   faceEllipse(ctx);
   ctx.fill();
   faceEllipse(ctx);
-  coreShadow(ctx, CX + 30, HEAD_Y + 20, 34, 0.25);
+  coreShadow(ctx, CX + 30, HEAD_Y + 22, 30, 0.12);
   faceEllipse(ctx);
   ctx.strokeStyle = outline();
   ctx.lineWidth = LINE;
@@ -535,31 +508,22 @@ function head(ctx: Ctx, mouth: MouthShape, blink: boolean): void {
   hair(ctx);
   for (const s of [-1, 1]) {
     const b = ctx.createRadialGradient(CX + s * 25, HEAD_Y + 14, 0, CX + s * 25, HEAD_Y + 14, 10);
-    b.addColorStop(0, 'rgba(235,120,105,0.55)');
+    b.addColorStop(0, 'rgba(235,120,105,0.35)');
     b.addColorStop(1, 'rgba(235,120,105,0)');
     ctx.fillStyle = b;
     ctx.fillRect(CX + s * 25 - 10, HEAD_Y + 4, 20, 20);
   }
   eyes(ctx, blink);
+  // short, simple brows; no nose (keeps the face clean at phone size)
   ctx.strokeStyle = HAIR;
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 3;
   ctx.lineCap = 'round';
   for (const s of [-1, 1]) {
     ctx.beginPath();
-    ctx.moveTo(CX + s * 7, HEAD_Y - 17);
-    ctx.quadraticCurveTo(CX + s * 15, HEAD_Y - 22, CX + s * 23, HEAD_Y - 18);
+    ctx.moveTo(CX + s * 9, HEAD_Y - 15);
+    ctx.quadraticCurveTo(CX + s * 14, HEAD_Y - 18, CX + s * 19, HEAD_Y - 15);
     ctx.stroke();
   }
-  ctx.strokeStyle = 'rgba(150,80,40,0.7)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(CX + 1, HEAD_Y + 2);
-  ctx.quadraticCurveTo(CX + 6, HEAD_Y + 11, CX - 2, HEAD_Y + 13);
-  ctx.stroke();
-  ctx.fillStyle = 'rgba(255,240,220,0.7)';
-  ctx.beginPath();
-  ctx.arc(CX - 1, HEAD_Y + 6, 1.6, 0, Math.PI * 2);
-  ctx.fill();
   drawMouth(ctx, mouth);
 }
 
